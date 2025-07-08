@@ -620,8 +620,11 @@ for installer_path in "$INSTALLERS_DIR"/*; do
           echo "  ❌ PKG安装失败。"
         fi
         echo "  [调试] PKG安装命令执行完成"
-      else
-        # 没有PKG文件，查找.app文件
+      fi
+      
+      # 无论是否有PKG，都检查是否有.app文件需要安装
+      if [ -z "$PKG_PATH" ] || [ -n "$PKG_PATH" ]; then
+        # 查找.app文件
         echo "  🔍 查找 .app 文件..."
         APP_PATH=$(find "$MOUNT_POINT" -name "*.app" -maxdepth 3 -print -quit 2>/dev/null)
         

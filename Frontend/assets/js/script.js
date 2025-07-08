@@ -82,12 +82,28 @@ function generateCommand(path) {
     
     // 尝试从常见的路径模式中提取信息
     if (path.includes('/')) {
-        // 检查是否包含Downloads路径
-        if (path.includes('Downloads/')) {
-            const downloadsIndex = path.lastIndexOf('Downloads/');
-            const folderName = path.substring(downloadsIndex);
-            guessedPath = `~/${folderName}`;
+        // 如果路径以 /Volumes/ 开头，说明是外部磁盘，保持原样
+        if (path.startsWith('/Volumes/') || path.includes('/Volumes/')) {
+            guessedPath = path;
+        }
+        // 检查是否包含用户目录的常见路径
+        else if (path.includes('Downloads/') || path.includes('Desktop/') || path.includes('Documents/')) {
+            // 只有当路径明确在用户目录下时，才使用 ~ 简写
+            if (path.includes('/Users/')) {
+                const userDirIndex = path.indexOf('/Users/');
+                const pathAfterUsers = path.substring(userDirIndex);
+                const pathParts = pathAfterUsers.split('/');
+                if (pathParts.length >= 3) {
+                    // 提取用户名后的路径部分
+                    const relativeToHome = pathParts.slice(2).join('/');
+                    guessedPath = `~/${relativeToHome}`;
+                }
+            } else {
+                // 如果没有 /Users/ 前缀，保持原样
+                guessedPath = path;
+            }
         } else {
+            // 其他情况保持原样
             guessedPath = path;
         }
     } else {
@@ -96,12 +112,12 @@ function generateCommand(path) {
     }
     
     fullPathInput.value = guessedPath;
-    fullPathInput.placeholder = '例如: ~/Downloads/installers 或 /Users/fiber/Downloads/installers';
+    fullPathInput.placeholder = '例如: ~/Downloads/installers 或 /Volumes/External/installers';
     
     // 添加提示信息
     const hint = document.querySelector('.path-hint');
     if (hint) {
-        hint.innerHTML = '支持 <code>~</code> 作为用户目录的简写';
+        hint.innerHTML = '支持 <code>~</code> 作为用户目录的简写，外部磁盘请使用完整路径';
     }
     
     // 监听路径输入变化（避免重复添加监听器）
