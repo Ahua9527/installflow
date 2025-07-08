@@ -63,12 +63,12 @@ header p {
 }
 
 .drop-zone {
-    border: 2px dashed var(--border);
-    border-radius: 8px;
-    padding: 3rem 2rem;
+    border: 3px dashed var(--border);
+    border-radius: 12px;
+    padding: 4rem 2rem;
     text-align: center;
     transition: all 0.3s ease;
-    cursor: pointer;
+    background-color: var(--surface);
 }
 
 .drop-zone.drag-over {
@@ -85,8 +85,8 @@ header p {
 }
 
 .upload-icon {
-    width: 48px;
-    height: 48px;
+    width: 64px;
+    height: 64px;
     color: var(--text-secondary);
     transition: color 0.3s ease;
 }
@@ -96,9 +96,10 @@ header p {
 }
 
 .drop-text {
-    font-size: 1.25rem;
+    font-size: 1.5rem;
     font-weight: 600;
     color: var(--text-primary);
+    margin-top: 1rem;
 }
 
 .drop-subtext {
@@ -106,39 +107,6 @@ header p {
     color: var(--text-secondary);
 }
 
-.select-button, .manual-button {
-    background-color: var(--primary-color);
-    color: white;
-    border: none;
-    padding: 0.75rem 2rem;
-    font-size: 1rem;
-    font-weight: 500;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-}
-
-.manual-button {
-    background-color: var(--secondary-color);
-    margin-top: 0.5rem;
-}
-
-.select-button:hover, .manual-button:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-md);
-}
-
-.select-button:hover {
-    background-color: var(--primary-hover);
-}
-
-.manual-button:hover {
-    background-color: var(--secondary-hover);
-}
-
-.select-button:active, .manual-button:active {
-    transform: translateY(0);
-}
 
 .command-section {
     background: var(--background);

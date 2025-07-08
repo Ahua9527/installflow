@@ -1,7 +1,5 @@
 // DOM 元素
 const dropZone = document.getElementById('dropZone');
-const folderInput = document.getElementById('folderInput');
-const selectBtn = document.getElementById('selectBtn');
 const commandSection = document.getElementById('commandSection');
 const commandDisplay = document.getElementById('commandDisplay');
 const copyBtn = document.getElementById('copyBtn');
@@ -11,85 +9,15 @@ const copyNotification = document.getElementById('copyNotification');
 let currentPath = '';
 let fullPathInput = null;
 
-// 事件监听器
-selectBtn.addEventListener('click', () => {
-    folderInput.click();
-});
-
-
-folderInput.addEventListener('change', handleFileSelect);
-
 // 拖拽事件
 dropZone.addEventListener('dragover', handleDragOver);
 dropZone.addEventListener('dragleave', handleDragLeave);
 dropZone.addEventListener('drop', handleDrop);
 
-// 点击拖拽区域也可以选择文件
-dropZone.addEventListener('click', () => {
-    folderInput.click();
-});
 
 // 复制按钮
 copyBtn.addEventListener('click', copyCommand);
 
-// 处理文件选择
-function handleFileSelect(e) {
-    const files = e.target.files;
-    
-    // 即使文件数量为0，也尝试从input元素获取信息
-    if (folderInput.files && folderInput.files.length > 0) {
-        const file = folderInput.files[0];
-        const relativePath = file.webkitRelativePath;
-        
-        if (relativePath) {
-            // 提取文件夹名称（第一级目录）
-            const folderName = relativePath.split('/')[0];
-            console.log('Selected folder:', folderName);
-            displayPath(folderName);
-            return;
-        }
-    }
-    
-    // 如果上面的方法失败，尝试使用一个技巧
-    // 某些浏览器会在用户选择文件夹后立即触发change事件
-    // 我们可以尝试获取最后选择的路径
-    if (e.target.value) {
-        // 从完整路径中提取文件夹名称
-        const fullPath = e.target.value;
-        const pathParts = fullPath.split(/[\\\/]/); // 支持Windows和Unix路径
-        const folderName = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2];
-        
-        if (folderName) {
-            console.log('Extracted folder name from path:', folderName);
-            displayPath(folderName);
-            return;
-        }
-    }
-    
-    // 如果所有方法都失败了
-    console.log('Unable to determine folder name');
-    
-    // 提示用户直接在下方输入完整路径
-    setTimeout(() => {
-        commandSection.style.display = 'block';
-        fullPathInput = document.getElementById('fullPath');
-        fullPathInput.placeholder = '请直接输入完整文件夹路径';
-        fullPathInput.focus();
-        
-        const hint = document.querySelector('.path-hint');
-        if (hint) {
-            hint.innerHTML = '由于浏览器限制，请直接输入文件夹的完整路径';
-        }
-        
-        // 监听路径输入变化
-        if (!fullPathInput.hasAttribute('data-listener-added')) {
-            fullPathInput.addEventListener('input', handlePathInput);
-            fullPathInput.setAttribute('data-listener-added', 'true');
-        }
-        
-        updateCommand();
-    }, 100);
-}
 
 // 处理拖拽悬停
 function handleDragOver(e) {
