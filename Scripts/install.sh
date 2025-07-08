@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # ==============================================================================
-# Mac Setup Bootstrap Script
-# 一键下载并执行 Mac 自动化配置脚本
+# 🔔 叮当装 InstallFlow - Mac 批量安装工具
+# 一键批量安装 Mac 应用，让装机像叮当一样简单
 # 
 # 使用方法：
-# curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh | bash
+# curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh | bash -s -- "/path/to/installers"
 # 或者：
-# bash <(curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh)
+# bash <(curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh) "/path/to/installers"
 # ==============================================================================
 
 set -e
@@ -78,9 +78,9 @@ show_welcome() {
     echo ""
     echo -e "${BLUE}╔══════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${BLUE}║                                                              ║${NC}"
-    echo -e "${BLUE}║                   🚀 Mac Setup Bootstrap                     ║${NC}"
+    echo -e "${BLUE}║                 🔔 叮当装 InstallFlow                        ║${NC}"
     echo -e "${BLUE}║                                                              ║${NC}"
-    echo -e "${BLUE}║            使用本地安装包进行自动化配置                        ║${NC}"
+    echo -e "${BLUE}║         一键批量安装 Mac 应用，让装机像叮当一样简单          ║${NC}"
     echo -e "${BLUE}║                                                              ║${NC}"
     echo -e "${BLUE}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -538,7 +538,7 @@ cd "$(dirname "$0")"
 INSTALLERS_DIR="./installers"
 APPLICATIONS_DIR="/Applications"
 
-echo "🚀 开始自动化配置新的 Mac..."
+echo "🔔 叮当装正在为您安装应用..."
 echo "========================================"
 
 if [ ! -d "$INSTALLERS_DIR" ]; then
@@ -1019,6 +1019,8 @@ cleanup() {
 
 # 显示使用帮助
 show_help() {
+    echo "🔔 叮当装 InstallFlow - Mac 批量安装工具"
+    echo ""
     echo "用法: $0 [选项] <安装包目录>"
     echo ""
     echo "选项："
@@ -1064,7 +1066,7 @@ main() {
     cleanup
     
     echo ""
-    log "🎉 Mac 配置完成！享受您的新环境吧！"
+    log "🎉 叮当装完成！所有应用已安装完毕！"
     echo ""
     
     # 检查是否需要提醒重新启用Gatekeeper

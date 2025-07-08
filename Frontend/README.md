@@ -1,6 +1,6 @@
-# Web 文件选择器
+# 🔔 叮当装 InstallFlow Web 界面
 
-一个现代化的 Web 文件夹选择器，用于配合 `bootstrap.sh` 脚本使用。支持点击选择和拖拽文件夹功能。
+一个现代化的 Web 文件夹选择器，用于配合 InstallFlow 脚本使用。支持点击选择和拖拽文件夹功能。
 
 ## 功能特性
 
@@ -53,17 +53,17 @@ start web-file-selector/index.html
 在终端中粘贴并执行复制的命令：
 
 ```bash
-bash bootstrap.sh "your-folder-path"
+curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh | bash -s -- "your-folder-path"
 ```
 
-## 与 Bootstrap.sh 集成
+## 与 InstallFlow 集成
 
-此工具专门设计用于配合 `bootstrap.sh` 脚本：
+此工具专门设计用于配合 InstallFlow 脚本：
 
 1. 用户通过网页选择包含安装包的文件夹
 2. 工具自动生成正确格式的命令
 3. 用户复制命令到终端执行
-4. `bootstrap.sh` 脚本处理指定文件夹中的安装包
+4. InstallFlow 脚本处理指定文件夹中的安装包
 
 ## 浏览器兼容性
 
@@ -80,7 +80,7 @@ bash bootstrap.sh "your-folder-path"
 ## 文件结构
 
 ```
-web-file-selector/
+Frontend/
 ├── index.html          # 主页面
 ├── assets/
 │   ├── css/
@@ -89,6 +89,10 @@ web-file-selector/
 │       └── script.js   # JavaScript 逻辑
 └── README.md           # 使用说明
 ```
+
+## 关于叮当装 InstallFlow
+
+叮当装（InstallFlow）让 Mac 批量装机变得简单快捷，像按下门铃一样轻松。
 
 ## License
 

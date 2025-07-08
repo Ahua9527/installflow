@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-InstallFlow is a macOS automation tool for batch installing applications from local packages. It consists of a bash script for installation and a web-based frontend for folder selection.
+叮当装 (InstallFlow) is a macOS automation tool for batch installing applications from local packages. It consists of a bash script for installation and a web-based frontend for folder selection. The project name combines Chinese "叮当装" (DingDang Zhuang - meaning "install with a ding-dong/bell sound") and English "InstallFlow".
 
 ## Architecture
 
