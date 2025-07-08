@@ -2,6 +2,7 @@
 const dropZone = document.getElementById('dropZone');
 const folderInput = document.getElementById('folderInput');
 const selectBtn = document.getElementById('selectBtn');
+const manualBtn = document.getElementById('manualBtn');
 const commandSection = document.getElementById('commandSection');
 const commandDisplay = document.getElementById('commandDisplay');
 const copyBtn = document.getElementById('copyBtn');
@@ -14,6 +15,13 @@ let fullPathInput = null;
 // 事件监听器
 selectBtn.addEventListener('click', () => {
     folderInput.click();
+});
+
+manualBtn.addEventListener('click', () => {
+    const path = prompt('请输入文件夹路径：\n\n例如：\n• ~/Downloads/installers\n• /Users/fiber/Downloads/installers');
+    if (path && path.trim()) {
+        displayPath(path.trim());
+    }
 });
 
 folderInput.addEventListener('change', handleFileSelect);
@@ -34,6 +42,7 @@ copyBtn.addEventListener('click', copyCommand);
 // 处理文件选择
 function handleFileSelect(e) {
     const files = e.target.files;
+    
     if (files.length > 0) {
         // 获取第一个文件的路径
         const file = files[0];
@@ -52,6 +61,13 @@ function handleFileSelect(e) {
         
         console.log('Selected folder info:', pathInfo);
         displayPath(folderName);
+    } else {
+        // 用户可能选择了一个空文件夹或取消了选择
+        // 在这种情况下，我们无法获取文件夹名称
+        console.log('No files selected or empty folder');
+        
+        // 显示提示信息并建议使用手动输入
+        alert('未能获取文件夹路径。\n\n可能原因：\n• 选择的文件夹为空\n• 浏览器安全限制\n\n建议使用"手动输入路径"按钮。');
     }
 }
 
