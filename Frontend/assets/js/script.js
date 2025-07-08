@@ -37,9 +37,21 @@ function handleFileSelect(e) {
     if (files.length > 0) {
         // 获取第一个文件的路径
         const file = files[0];
-        // 提取文件夹路径
-        const path = file.webkitRelativePath.split('/')[0];
-        displayPath(path);
+        // webkitRelativePath 包含相对路径信息
+        const relativePath = file.webkitRelativePath;
+        
+        // 提取文件夹名称（第一级目录）
+        const folderName = relativePath.split('/')[0];
+        
+        // 尝试保存更多路径信息
+        const pathInfo = {
+            folderName: folderName,
+            relativePath: relativePath,
+            fileCount: files.length
+        };
+        
+        console.log('Selected folder info:', pathInfo);
+        displayPath(folderName);
     }
 }
 
@@ -101,17 +113,58 @@ function generateCommand(path) {
     // 获取输入框元素
     fullPathInput = document.getElementById('fullPath');
     
-    // 设置默认推测的路径
-    const guessedPath = path.includes('/') ? path : `/Users/username/Downloads/${path}`;
-    fullPathInput.value = guessedPath;
+    // 尝试猜测完整路径
+    let guessedPath = path;
     
-    // 监听路径输入变化
-    fullPathInput.addEventListener('input', updateCommand);
+    // 尝试从常见的路径模式中提取信息
+    if (path.includes('/')) {
+        // 检查是否包含Downloads路径
+        if (path.includes('Downloads/')) {
+            const downloadsIndex = path.lastIndexOf('Downloads/');
+            const folderName = path.substring(downloadsIndex);
+            guessedPath = `~/${folderName}`;
+        } else {
+            guessedPath = path;
+        }
+    } else {
+        // 只有文件夹名称，默认假设在Downloads目录
+        guessedPath = `~/Downloads/${path}`;
+    }
+    
+    fullPathInput.value = guessedPath;
+    fullPathInput.placeholder = '例如: ~/Downloads/installers 或 /Users/fiber/Downloads/installers';
+    
+    // 添加提示信息
+    const hint = document.querySelector('.path-hint');
+    if (hint) {
+        hint.innerHTML = '支持 <code>~</code> 作为用户目录的简写';
+    }
+    
+    // 监听路径输入变化（避免重复添加监听器）
+    if (!fullPathInput.hasAttribute('data-listener-added')) {
+        fullPathInput.addEventListener('input', handlePathInput);
+        fullPathInput.setAttribute('data-listener-added', 'true');
+    }
+    
+    // 聚焦到输入框，方便用户修改
+    fullPathInput.focus();
     
     // 初始生成命令
     updateCommand();
     
     commandSection.style.display = 'block';
+}
+
+// 处理路径输入
+function handlePathInput() {
+    // 保存用户名到localStorage
+    const currentPath = fullPathInput.value;
+    const userMatch = currentPath.match(/\/Users\/([^\/]+)\//);
+    if (userMatch && userMatch[1] && userMatch[1] !== '[username]') {
+        localStorage.setItem('installflow_username', userMatch[1]);
+    }
+    
+    updateCommand();
 }
 
 // 更新命令显示

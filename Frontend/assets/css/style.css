@@ -281,6 +281,22 @@ header p {
     color: var(--text-secondary);
 }
 
+.path-hint code {
+    background-color: #fee2e2;
+    color: #dc2626;
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.25rem;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.875rem;
+}
+
+@media (prefers-color-scheme: dark) {
+    .path-hint code {
+        background-color: #7f1d1d;
+        color: #fca5a5;
+    }
+}
+
 footer {
     text-align: center;
     margin-top: 3rem;

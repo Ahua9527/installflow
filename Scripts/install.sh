@@ -55,6 +55,9 @@ parse_arguments() {
     
     local installers_path="$1"
     
+    # 展开 ~ 路径
+    installers_path="${installers_path/#\~/$HOME}"
+    
     # 检查路径是否存在
     if [ ! -d "$installers_path" ]; then
         error "指定的目录不存在: $installers_path"
