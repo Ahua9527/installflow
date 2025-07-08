@@ -4,10 +4,10 @@
 # 🔔 叮当装 InstallFlow - Mac 批量安装工具
 # 一键批量安装 Mac 应用，让装机像叮当一样简单
 # 
-# 使用方法：
-# curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh | bash -s -- "/path/to/installers"
+# 使用方法（推荐第二种，支持交互式选择）：
+# bash <(curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh) "~/Downloads/installers"
 # 或者：
-# bash <(curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh) "/path/to/installers"
+# bash <(curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh) "/Users/your-name/Downloads/installers"
 # ==============================================================================
 
 set -e

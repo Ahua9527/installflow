@@ -27,11 +27,11 @@
 ### 方式二：命令行直接使用
 
 ```bash
-# 使用 curl 下载并执行
-curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh | bash -s -- "/path/to/your/installers"
+# 推荐：使用 bash 进程替换（支持交互式选择）
+bash <(curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh) "~/Downloads/installers"
 
-# 或使用 bash
-bash <(curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh) "/path/to/your/installers"
+# 或指定完整路径
+bash <(curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh) "/Users/your-name/Downloads/installers"
 ```
 
 ### 方式三：本地执行

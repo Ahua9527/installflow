@@ -171,7 +171,9 @@ function handlePathInput() {
 function updateCommand() {
     const fullPath = fullPathInput.value || currentPath;
     const scriptUrl = 'https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh';
-    const command = `curl -fsSL ${scriptUrl} | bash -s -- "${fullPath}"`;
+    
+    // 使用 bash <() 语法来保持交互式环境
+    const command = `bash <(curl -fsSL ${scriptUrl}) "${fullPath}"`;
     
     // 使用 Markdown 格式
     const markdownContent = `\`\`\`bash
@@ -186,7 +188,9 @@ ${command}
 async function copyCommand() {
     const fullPath = fullPathInput.value || currentPath;
     const scriptUrl = 'https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh';
-    const command = `curl -fsSL ${scriptUrl} | bash -s -- "${fullPath}"`;
+    
+    // 使用 bash <() 语法来保持交互式环境
+    const command = `bash <(curl -fsSL ${scriptUrl}) "${fullPath}"`;
     
     try {
         await navigator.clipboard.writeText(command);
