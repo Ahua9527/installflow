@@ -9,6 +9,7 @@ const copyNotification = document.getElementById('copyNotification');
 
 // 状态
 let currentPath = '';
+let fullPathInput = null;
 
 // 事件监听器
 selectBtn.addEventListener('click', () => {
@@ -97,8 +98,27 @@ function displayPath(path) {
 
 // 生成命令
 function generateCommand(path) {
-    // 生成 shell 命令
-    const command = `bash bootstrap.sh "${path}"`;
+    // 获取输入框元素
+    fullPathInput = document.getElementById('fullPath');
+    
+    // 设置默认推测的路径
+    const guessedPath = path.includes('/') ? path : `/Users/username/Downloads/${path}`;
+    fullPathInput.value = guessedPath;
+    
+    // 监听路径输入变化
+    fullPathInput.addEventListener('input', updateCommand);
+    
+    // 初始生成命令
+    updateCommand();
+    
+    commandSection.style.display = 'block';
+}
+
+// 更新命令显示
+function updateCommand() {
+    const fullPath = fullPathInput.value || currentPath;
+    const scriptUrl = 'https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh';
+    const command = `curl -fsSL ${scriptUrl} | bash -s -- "${fullPath}"`;
     
     // 使用 Markdown 格式
     const markdownContent = `\`\`\`bash
@@ -107,12 +127,13 @@ ${command}
     
     // 渲染 Markdown
     commandDisplay.innerHTML = marked.parse(markdownContent);
-    commandSection.style.display = 'block';
 }
 
 // 复制命令到剪贴板
 async function copyCommand() {
-    const command = `bash bootstrap.sh "${currentPath}"`;
+    const fullPath = fullPathInput.value || currentPath;
+    const scriptUrl = 'https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh';
+    const command = `curl -fsSL ${scriptUrl} | bash -s -- "${fullPath}"`;
     
     try {
         await navigator.clipboard.writeText(command);

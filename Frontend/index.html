@@ -37,6 +37,11 @@
             <!-- 命令生成区域 -->
             <section id="commandSection" class="command-section" style="display: none;">
                 <h2>🚀 生成的命令</h2>
+                <div class="path-input-wrapper">
+                    <label for="fullPath">完整路径：</label>
+                    <input type="text" id="fullPath" class="path-input" placeholder="例如: /Users/fiber/Downloads/installers">
+                    <p class="path-hint">请输入文件夹的完整路径</p>
+                </div>
                 <div id="commandDisplay" class="command-display"></div>
                 <button id="copyBtn" class="copy-button">
                     <svg class="copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -53,6 +58,7 @@
                 <h2>📖 使用说明</h2>
                 <ol>
                     <li>点击"选择文件夹"按钮或拖拽文件夹到上方区域</li>
+                    <li>在"完整路径"输入框中确认或修改文件夹的实际路径</li>
                     <li>点击"复制命令"按钮</li>
                     <li>在终端中粘贴并执行命令</li>
                 </ol>
@@ -60,7 +66,7 @@
         </main>
 
         <footer>
-            <p>🔧 配合 Install.sh 脚本使用</p>
+            <p>🔧 配合 install.sh 脚本使用</p>
         </footer>
     </div>
 

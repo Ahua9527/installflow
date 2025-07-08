@@ -5,9 +5,9 @@
 # 一键下载并执行 Mac 自动化配置脚本
 # 
 # 使用方法：
-# curl -fsSL https://raw.githubusercontent.com/yourname/mac-setup/main/bootstrap.sh | bash
+# curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh | bash
 # 或者：
-# bash <(curl -fsSL https://your-domain.com/bootstrap.sh)
+# bash <(curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh)
 # ==============================================================================
 
 set -e
