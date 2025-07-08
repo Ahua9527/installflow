@@ -40,15 +40,38 @@ function handleDrop(e) {
     dropZone.classList.remove('drag-over');
 
     const items = e.dataTransfer.items;
+    const files = e.dataTransfer.files;
+    
+    // 首先尝试从 files 获取路径信息
+    if (files && files.length > 0) {
+        const file = files[0];
+        console.log('File object:', file);
+        console.log('File path (if available):', file.path || 'Not available');
+        console.log('File webkitRelativePath:', file.webkitRelativePath || 'Not available');
+    }
     
     if (items) {
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
             if (item.kind === 'file') {
                 const entry = item.webkitGetAsEntry();
+                console.log('Entry:', entry);
+                console.log('Entry fullPath:', entry ? entry.fullPath : 'Not available');
+                console.log('Entry name:', entry ? entry.name : 'Not available');
+                
                 if (entry && entry.isDirectory) {
-                    // 获取文件夹名称
+                    // 由于浏览器安全限制，我们只能获取文件夹名称
+                    // 无法获取完整的绝对路径
                     displayPath(entry.name);
+                    
+                    // 显示提示让用户确认完整路径
+                    setTimeout(() => {
+                        const hint = document.querySelector('.path-hint');
+                        if (hint) {
+                            hint.innerHTML = '⚠️ 浏览器安全限制无法获取完整路径，请确认上方路径是否正确';
+                            hint.style.color = '#dc2626';
+                        }
+                    }, 100);
                     break;
                 } else if (entry && entry.isFile) {
                     // 如果是文件，获取其父文件夹
@@ -77,47 +100,16 @@ function generateCommand(path) {
     // 获取输入框元素
     fullPathInput = document.getElementById('fullPath');
     
-    // 尝试猜测完整路径
-    let guessedPath = path;
-    
-    // 尝试从常见的路径模式中提取信息
-    if (path.includes('/')) {
-        // 如果路径以 /Volumes/ 开头，说明是外部磁盘，保持原样
-        if (path.startsWith('/Volumes/') || path.includes('/Volumes/')) {
-            guessedPath = path;
-        }
-        // 检查是否包含用户目录的常见路径
-        else if (path.includes('Downloads/') || path.includes('Desktop/') || path.includes('Documents/')) {
-            // 只有当路径明确在用户目录下时，才使用 ~ 简写
-            if (path.includes('/Users/')) {
-                const userDirIndex = path.indexOf('/Users/');
-                const pathAfterUsers = path.substring(userDirIndex);
-                const pathParts = pathAfterUsers.split('/');
-                if (pathParts.length >= 3) {
-                    // 提取用户名后的路径部分
-                    const relativeToHome = pathParts.slice(2).join('/');
-                    guessedPath = `~/${relativeToHome}`;
-                }
-            } else {
-                // 如果没有 /Users/ 前缀，保持原样
-                guessedPath = path;
-            }
-        } else {
-            // 其他情况保持原样
-            guessedPath = path;
-        }
-    } else {
-        // 只有文件夹名称，默认假设在Downloads目录
-        guessedPath = `~/Downloads/${path}`;
-    }
-    
-    fullPathInput.value = guessedPath;
-    fullPathInput.placeholder = '例如: ~/Downloads/installers 或 /Volumes/External/installers';
+    // 由于浏览器限制，我们只能获取文件夹名称
+    // 让用户自己输入完整路径
+    fullPathInput.value = '';
+    fullPathInput.placeholder = `请输入 "${path}" 的完整路径`;
     
     // 添加提示信息
     const hint = document.querySelector('.path-hint');
     if (hint) {
-        hint.innerHTML = '支持 <code>~</code> 作为用户目录的简写，外部磁盘请使用完整路径';
+        hint.innerHTML = `已识别文件夹: <code>${path}</code>，请输入其完整路径`;
+        hint.style.color = 'var(--text-secondary)';
     }
     
     // 监听路径输入变化（避免重复添加监听器）
@@ -128,6 +120,7 @@ function generateCommand(path) {
     
     // 聚焦到输入框，方便用户修改
     fullPathInput.focus();
+    fullPathInput.select();
     
     // 初始生成命令
     updateCommand();
