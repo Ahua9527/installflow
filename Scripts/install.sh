@@ -647,110 +647,102 @@ for installer_path in "$INSTALLERS_DIR"/*; do
       ls -la "$MOUNT_POINT" 2>/dev/null | head -10
       echo ""
       
-      # 首先检查是否有PKG文件（优先处理安装器）
-      echo "  🔍 查找 PKG 安装包..."
-      echo "  [调试] 挂载点: $MOUNT_POINT"
+      # 第一步：检查是否有PKG文件（优先处理安装器）
+      echo "  🔍 Step 1: 查找 PKG 安装包..."
       
-      # 使用更可靠的方法查找PKG文件
-      PKG_PATH=""
-      # 方法1: 直接ls查找
-      if [ -z "$PKG_PATH" ]; then
-        PKG_PATH=$(ls "$MOUNT_POINT"/*.pkg 2>/dev/null | head -1)
-        echo "  [调试] 方法1(ls): $PKG_PATH"
-      fi
-      # 方法2: 简化的find命令作为备用
-      if [ -z "$PKG_PATH" ]; then
-        PKG_PATH=$(find "$MOUNT_POINT" -name "*.pkg" 2>/dev/null | head -1)
-        echo "  [调试] 方法2(find): $PKG_PATH"
-      fi
-      echo "  [调试] 最终PKG_PATH: $PKG_PATH"
+      # 简化的PKG查找逻辑
+      PKG_PATH=$(find "$MOUNT_POINT" -name "*.pkg" -maxdepth 2 2>/dev/null | head -1)
       
       if [ -n "$PKG_PATH" ]; then
         # DMG包含PKG安装包
         PKG_NAME=$(basename "$PKG_PATH")
         echo "  📦 发现PKG安装包: $PKG_NAME"
         echo "  📦 正在安装PKG..."
-        echo "  [调试] 执行命令: sudo installer -pkg \"$PKG_PATH\" -target /"
         
         if sudo installer -pkg "$PKG_PATH" -target /; then
-          echo "  ✅ PKG安装成功。"
+          echo "  ✅ PKG安装成功"
         else
-          echo "  ❌ PKG安装失败。"
+          echo "  ❌ PKG安装失败"
         fi
-        echo "  [调试] PKG安装命令执行完成"
+      else
+        echo "  ℹ️  未发现PKG安装包"
       fi
       
-      # 无论是否有PKG，都检查是否有.app文件需要安装
-      if [ -z "$PKG_PATH" ] || [ -n "$PKG_PATH" ]; then
-        # 查找.app文件
-        echo "  🔍 查找 .app 文件..."
+      # 第二步：只有在没有PKG时才查找.app文件
+      if [ -z "$PKG_PATH" ]; then
+        echo "  🔍 Step 2: 查找 .app 文件..."
         APP_PATH=$(find "$MOUNT_POINT" -name "*.app" -maxdepth 3 -print -quit 2>/dev/null)
+      else
+        echo "  ℹ️  Step 2: 已找到PKG安装包，跳过.app文件安装"
+        echo "  💡 PKG安装包通常包含完整的应用程序，无需额外安装.app文件"
+        APP_PATH=""
+      fi
+      
+      if [ -n "$APP_PATH" ]; then
+        # 常规DMG包含.app文件
+        APP_NAME=$(basename "$APP_PATH")
+        TARGET_APP_PATH="$APPLICATIONS_DIR/$APP_NAME"
+        echo "  ✅ 找到应用: $APP_NAME"
         
-        if [ -n "$APP_PATH" ]; then
-          # 常规DMG包含.app文件
-          APP_NAME=$(basename "$APP_PATH")
-          TARGET_APP_PATH="$APPLICATIONS_DIR/$APP_NAME"
-          echo "  ✅ 找到应用: $APP_NAME"
-          
-          if [ -d "$TARGET_APP_PATH" ]; then
-            echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
-          else
-            echo "  正在将 '$APP_NAME' 拷贝到 $APPLICATIONS_DIR ..."
-            sudo cp -R "$APP_PATH" "$APPLICATIONS_DIR/"
-            echo "  ✅ 拷贝完成。"
-            
-            # 移除应用的隔离属性
-            echo "  正在移除应用的隔离属性..."
-            sudo xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
-            echo "  ✅ 隔离属性移除完成。"
-          fi
+        if [ -d "$TARGET_APP_PATH" ]; then
+          echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
         else
-          echo "  ❌ 未找到 .app 文件"
-          # 检查是否是TNT团队的特殊结构
-          echo "  🔍 检查TNT特殊结构..."
+          echo "  正在将 '$APP_NAME' 拷贝到 $APPLICATIONS_DIR ..."
+          sudo cp -R "$APP_PATH" "$APPLICATIONS_DIR/"
+          echo "  ✅ 拷贝完成。"
           
-          # 首先查找Manual install目录
-          MANUAL_INSTALL_DIR=$(find "$MOUNT_POINT" -name "*[Mm]anual*install*" -type d 2>/dev/null | head -1)
+          # 移除应用的隔离属性
+          echo "  正在移除应用的隔离属性..."
+          sudo xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
+          echo "  ✅ 隔离属性移除完成。"
+        fi
+      else
+        echo "  ❌ 未找到 .app 文件"
+        # 第三步：检查是否是TNT团队的特殊结构
+        echo "  🔍 Step 3: 检查TNT特殊结构..."
+        
+        # 首先查找Manual install目录
+        MANUAL_INSTALL_DIR=$(find "$MOUNT_POINT" -name "*[Mm]anual*install*" -type d 2>/dev/null | head -1)
+        
+        if [ -n "$MANUAL_INSTALL_DIR" ]; then
+          echo "  🎯 发现TNT结构，找到Manual install目录: $(basename "$MANUAL_INSTALL_DIR")"
           
-          if [ -n "$MANUAL_INSTALL_DIR" ]; then
-            echo "  🎯 发现TNT结构，找到Manual install目录: $(basename "$MANUAL_INSTALL_DIR")"
+          # 在Manual install目录中查找DMG文件
+          MANUAL_INSTALL_DMG=$(find "$MANUAL_INSTALL_DIR" -name "*.dmg" 2>/dev/null | head -1)
+          
+          if [ -n "$MANUAL_INSTALL_DMG" ]; then
+            echo "  📦 在Manual install目录中找到DMG: $(basename "$MANUAL_INSTALL_DMG")"
+            echo "  📦 正在挂载嵌套DMG..."
             
-            # 在Manual install目录中查找DMG文件
-            MANUAL_INSTALL_DMG=$(find "$MANUAL_INSTALL_DIR" -name "*.dmg" 2>/dev/null | head -1)
+            # 挂载嵌套的DMG
+            NESTED_HDIUTIL_OUTPUT=$(sudo hdiutil attach "$MANUAL_INSTALL_DMG" -nobrowse -owners on 2>&1)
+            NESTED_HDIUTIL_EXIT_CODE=$?
             
-            if [ -n "$MANUAL_INSTALL_DMG" ]; then
-              echo "  📦 在Manual install目录中找到DMG: $(basename "$MANUAL_INSTALL_DMG")"
-              echo "  📦 正在挂载嵌套DMG..."
+            if [ $NESTED_HDIUTIL_EXIT_CODE -ne 0 ]; then
+              echo "  ❌ 嵌套DMG挂载失败"
+            else
+              NESTED_MOUNT_POINT=$(echo "$NESTED_HDIUTIL_OUTPUT" | grep '/Volumes/' | tail -1 | sed 's/.*\(\/Volumes\/.*\)$/\1/' | sed 's/[[:space:]]*$//')
               
-              # 挂载嵌套的DMG
-              NESTED_HDIUTIL_OUTPUT=$(sudo hdiutil attach "$MANUAL_INSTALL_DMG" -nobrowse -owners on 2>&1)
-              NESTED_HDIUTIL_EXIT_CODE=$?
-              
-              if [ $NESTED_HDIUTIL_EXIT_CODE -ne 0 ]; then
-                echo "  ❌ 嵌套DMG挂载失败"
-              else
-                NESTED_MOUNT_POINT=$(echo "$NESTED_HDIUTIL_OUTPUT" | grep '/Volumes/' | tail -1 | sed 's/.*\(\/Volumes\/.*\)$/\1/' | sed 's/[[:space:]]*$//')
+              if [ -n "$NESTED_MOUNT_POINT" ] && [ -d "$NESTED_MOUNT_POINT" ]; then
+                echo "  ✅ 嵌套DMG已挂载到: $NESTED_MOUNT_POINT"
                 
-                if [ -n "$NESTED_MOUNT_POINT" ] && [ -d "$NESTED_MOUNT_POINT" ]; then
-                  echo "  ✅ 嵌套DMG已挂载到: $NESTED_MOUNT_POINT"
+                # 在嵌套DMG中查找.app文件
+                NESTED_APP_PATH=$(find "$NESTED_MOUNT_POINT" -name "*.app" -maxdepth 3 -print -quit 2>/dev/null)
+                
+                if [ -n "$NESTED_APP_PATH" ]; then
+                  APP_NAME=$(basename "$NESTED_APP_PATH")
+                  TARGET_APP_PATH="$APPLICATIONS_DIR/$APP_NAME"
+                  echo "  🔍 在嵌套DMG中找到应用: $APP_NAME"
                   
-                  # 在嵌套DMG中查找.app文件
-                  NESTED_APP_PATH=$(find "$NESTED_MOUNT_POINT" -name "*.app" -maxdepth 3 -print -quit 2>/dev/null)
-                  
-                  if [ -n "$NESTED_APP_PATH" ]; then
-                    APP_NAME=$(basename "$NESTED_APP_PATH")
-                    TARGET_APP_PATH="$APPLICATIONS_DIR/$APP_NAME"
-                    echo "  🔍 在嵌套DMG中找到应用: $APP_NAME"
-                    
-                    if [ -d "$TARGET_APP_PATH" ]; then
-                      echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
-                    else
-                      echo "  正在将 '$APP_NAME' 拷贝到 $APPLICATIONS_DIR ..."
-                      sudo cp -R "$NESTED_APP_PATH" "$APPLICATIONS_DIR/"
-                      echo "  ✅ 拷贝完成。"
-                    fi
+                  if [ -d "$TARGET_APP_PATH" ]; then
+                    echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
                   else
-                    echo "  ❌ 在嵌套DMG中也未找到 .app 文件。"
+                    echo "  正在将 '$APP_NAME' 拷贝到 $APPLICATIONS_DIR ..."
+                    sudo cp -R "$NESTED_APP_PATH" "$APPLICATIONS_DIR/"
+                    echo "  ✅ 拷贝完成。"
+                  fi
+                else
+                  echo "  ❌ 在嵌套DMG中也未找到 .app 文件。"
                 fi
                 
                 # 推出嵌套DMG
@@ -766,30 +758,30 @@ for installer_path in "$INSTALLERS_DIR"/*; do
                 echo "  ❌ 无法确定嵌套DMG挂载点"
               fi
             fi
-            else
-              echo "  🔍 Manual install目录中未找到DMG文件，直接查找.app文件..."
-              # 直接在Manual install目录中查找.app文件
-              MANUAL_APP_PATH=$(find "$MANUAL_INSTALL_DIR" -name "*.app" -maxdepth 3 -print -quit)
-              
-              if [ -n "$MANUAL_APP_PATH" ]; then
-                APP_NAME=$(basename "$MANUAL_APP_PATH")
-                TARGET_APP_PATH="$APPLICATIONS_DIR/$APP_NAME"
-                echo "  🔍 在Manual install目录中找到应用: $APP_NAME"
-                
-                if [ -d "$TARGET_APP_PATH" ]; then
-                  echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
-                else
-                  echo "  正在将 '$APP_NAME' 拷贝到 $APPLICATIONS_DIR ..."
-                  sudo cp -R "$MANUAL_APP_PATH" "$APPLICATIONS_DIR/"
-                  echo "  ✅ 拷贝完成。"
-                fi
-              else
-                echo "  ❌ 在Manual install目录中也未找到 .app 文件。"
-              fi
-            fi
           else
-            # 查找直接的嵌套DMG文件（作为备用方案）
-            MANUAL_INSTALL_DMG=$(find "$MOUNT_POINT" -name "*[Mm]anual*install*.dmg" -o -name "*[Mm]anual*.dmg" -o -name "*install*.dmg" 2>/dev/null | head -1)
+            echo "  🔍 Manual install目录中未找到DMG文件，直接查找.app文件..."
+            # 直接在Manual install目录中查找.app文件
+            MANUAL_APP_PATH=$(find "$MANUAL_INSTALL_DIR" -name "*.app" -maxdepth 3 -print -quit)
+            
+            if [ -n "$MANUAL_APP_PATH" ]; then
+              APP_NAME=$(basename "$MANUAL_APP_PATH")
+              TARGET_APP_PATH="$APPLICATIONS_DIR/$APP_NAME"
+              echo "  🔍 在Manual install目录中找到应用: $APP_NAME"
+              
+              if [ -d "$TARGET_APP_PATH" ]; then
+                echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
+              else
+                echo "  正在将 '$APP_NAME' 拷贝到 $APPLICATIONS_DIR ..."
+                sudo cp -R "$MANUAL_APP_PATH" "$APPLICATIONS_DIR/"
+                echo "  ✅ 拷贝完成。"
+              fi
+            else
+              echo "  ❌ 在Manual install目录中也未找到 .app 文件。"
+            fi
+          fi
+        else
+          # 查找直接的嵌套DMG文件（作为备用方案）
+          MANUAL_INSTALL_DMG=$(find "$MOUNT_POINT" -name "*[Mm]anual*install*.dmg" -o -name "*[Mm]anual*.dmg" -o -name "*install*.dmg" 2>/dev/null | head -1)
           
             if [ -n "$MANUAL_INSTALL_DMG" ]; then
               echo "  🎯 发现嵌套DMG文件: $(basename "$MANUAL_INSTALL_DMG")"
@@ -826,24 +818,23 @@ for installer_path in "$INSTALLERS_DIR"/*; do
                   echo "  ❌ 在嵌套DMG中也未找到 .app 文件。"
                 fi
                 
-                  # 推出嵌套DMG
-                  echo "  正在推出嵌套DMG: $(basename "$MANUAL_INSTALL_DMG")..."
-                  sleep 1
-                  if sudo hdiutil detach "$NESTED_MOUNT_POINT" -quiet 2>/dev/null; then
-                    echo "  ✅ 嵌套DMG推出完成。"
-                  else
-                    sudo hdiutil detach "$NESTED_MOUNT_POINT" -force -quiet 2>/dev/null || true
-                    echo "  ✅ 嵌套DMG强制推出完成。"
-                  fi
+                # 推出嵌套DMG
+                echo "  正在推出嵌套DMG: $(basename "$MANUAL_INSTALL_DMG")..."
+                sleep 1
+                if sudo hdiutil detach "$NESTED_MOUNT_POINT" -quiet 2>/dev/null; then
+                  echo "  ✅ 嵌套DMG推出完成。"
                 else
-                  echo "  ❌ 无法确定嵌套DMG挂载点"
+                  sudo hdiutil detach "$NESTED_MOUNT_POINT" -force -quiet 2>/dev/null || true
+                  echo "  ✅ 嵌套DMG强制推出完成。"
                 fi
+              else
+                echo "  ❌ 无法确定嵌套DMG挂载点"
               fi
-            else
-              echo "  ❌ 在DMG中未找到 .app 文件、Manual install目录或嵌套DMG文件。"
-              echo "  📁 DMG内容列表："
-              ls -la "$MOUNT_POINT" | head -10
             fi
+          else
+            echo "  ❌ 在DMG中未找到 .app 文件、Manual install目录或嵌套DMG文件。"
+            echo "  📁 DMG内容列表："
+            ls -la "$MOUNT_POINT" | head -10
           fi
         fi
       fi
