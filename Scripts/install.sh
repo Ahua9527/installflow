@@ -650,8 +650,24 @@ for installer_path in "$INSTALLERS_DIR"/*; do
       # 第一步：检查是否有PKG文件（优先处理安装器）
       echo "  🔍 Step 1: 查找 PKG 安装包..."
       
-      # 简化的PKG查找逻辑
-      PKG_PATH=$(find "$MOUNT_POINT" -name "*.pkg" -maxdepth 2 2>/dev/null | head -1)
+      # 检查挂载点是否仍然存在
+      if [ ! -d "$MOUNT_POINT" ]; then
+        echo "  ❌ 挂载点已失效: $MOUNT_POINT"
+        continue
+      fi
+      
+      # 简化的PKG查找逻辑，使用更快的方式
+      echo "  [调试] 正在搜索: $MOUNT_POINT"
+      PKG_PATH=$(ls "$MOUNT_POINT"/*.pkg 2>/dev/null | head -1)
+      echo "  [调试] 第一次搜索结果: $PKG_PATH"
+      
+      # 如果ls没找到，尝试在子目录中查找
+      if [ -z "$PKG_PATH" ]; then
+        PKG_PATH=$(ls "$MOUNT_POINT"/*/*.pkg 2>/dev/null | head -1)
+        echo "  [调试] 第二次搜索结果: $PKG_PATH"
+      fi
+      
+      echo "  [调试] 最终PKG_PATH: $PKG_PATH"
       
       if [ -n "$PKG_PATH" ]; then
         # DMG包含PKG安装包
@@ -671,7 +687,20 @@ for installer_path in "$INSTALLERS_DIR"/*; do
       # 第二步：只有在没有PKG时才查找.app文件
       if [ -z "$PKG_PATH" ]; then
         echo "  🔍 Step 2: 查找 .app 文件..."
-        APP_PATH=$(find "$MOUNT_POINT" -name "*.app" -maxdepth 3 -print -quit 2>/dev/null)
+        
+        # 再次检查挂载点
+        if [ ! -d "$MOUNT_POINT" ]; then
+          echo "  ❌ 挂载点已失效: $MOUNT_POINT"
+          continue
+        fi
+        
+        # 使用简单快速的.app文件查找
+        APP_PATH=$(ls -d "$MOUNT_POINT"/*.app 2>/dev/null | head -1)
+        
+        # 如果ls没找到，尝试在子目录中查找
+        if [ -z "$APP_PATH" ]; then
+          APP_PATH=$(ls -d "$MOUNT_POINT"/*/*.app 2>/dev/null | head -1)
+        fi
       else
         echo "  ℹ️  Step 2: 已找到PKG安装包，跳过.app文件安装"
         echo "  💡 PKG安装包通常包含完整的应用程序，无需额外安装.app文件"
