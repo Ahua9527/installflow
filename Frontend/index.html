@@ -8,63 +8,70 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🔔 叮当装 InstallFlow</h1>
-            <p>一键批量安装 Mac 应用，让装机像叮当一样简单</p>
-        </header>
+    <div class="hero-background">
+        <div class="container">
+            <header class="hero-header">
+                <div class="hero-content">
+                    <div class="brand-logo">
+                        <div class="logo-icon">🔔</div>
+                        <h1>叮当装 InstallFlow</h1>
+                    </div>
+                    <p class="hero-subtitle">一键批量安装 Mac 应用，让装机像叮当一样简单</p>
+                </div>
+            </header>
 
-        <main>
-            <!-- 文件选择区域 -->
-            <section class="file-selector-section">
-                <div class="selector-wrapper">
-                    <div id="dropZone" class="drop-zone">
-                        <div class="drop-zone-content">
-                            <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                <polyline points="17 8 12 3 7 8"></polyline>
-                                <line x1="12" y1="3" x2="12" y2="15"></line>
-                            </svg>
-                            <p class="drop-text">拖拽文件夹到这里</p>
+            <main class="main-content">
+                <!-- 安装命令展示区域 -->
+                <section class="command-section">
+                    <div class="command-card">
+                        <div class="card-header">
+                            <h2>🚀 安装命令</h2>
+                            <p>复制下方命令并在终端中执行</p>
+                        </div>
+                        
+                        <div class="command-container">
+                            <div class="command-box">
+                                <code id="installCommand">bash <(curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh)</code>
+                            </div>
+                            <button id="copyBtn" class="copy-button">
+                                <svg class="copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                </svg>
+                                <span>复制命令</span>
+                            </button>
                         </div>
                     </div>
-                </div>
-            </section>
+                </section>
 
-            <!-- 命令生成区域 -->
-            <section id="commandSection" class="command-section" style="display: none;">
-                <h2>🚀 生成的命令</h2>
-                <div class="path-input-wrapper">
-                    <label for="fullPath">完整路径：</label>
-                    <input type="text" id="fullPath" class="path-input" placeholder="例如: /Users/fiber/Downloads/installers">
-                    <p class="path-hint">请输入文件夹的完整路径</p>
-                </div>
-                <div id="commandDisplay" class="command-display"></div>
-                <button id="copyBtn" class="copy-button">
-                    <svg class="copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                    </svg>
-                    复制命令
-                </button>
-                <div id="copyNotification" class="copy-notification">✅ 已复制到剪贴板</div>
-            </section>
+                <!-- 功能特色 -->
+                <section class="features-section">
+                    <h2>✨ 功能特色</h2>
+                    <div class="features-grid">
+                        <div class="feature-card">
+                            <div class="feature-icon">🎯</div>
+                            <h3>交互式选择</h3>
+                            <p>使用方向键和空格键轻松选择要安装的应用</p>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-icon">📦</div>
+                            <h3>多格式支持</h3>
+                            <p>支持 .dmg、.pkg、.zip、.app 等常见格式</p>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-icon">⚡</div>
+                            <h3>一键执行</h3>
+                            <p>通过简单的命令即可开始批量安装</p>
+                        </div>
+                    </div>
+                </section>
+            </main>
 
-            <!-- 使用说明 -->
-            <section class="instructions">
-                <h2>📖 使用说明</h2>
-                <ol>
-                    <li>拖拽包含安装包的文件夹到上方区域</li>
-                    <li>在"完整路径"输入框中确认或修改文件夹的实际路径</li>
-                    <li>点击"复制命令"按钮</li>
-                    <li>在终端中粘贴并执行命令</li>
-                </ol>
-            </section>
-        </main>
-
-        <footer>
-            <p>🔔 叮当装 InstallFlow - 让 Mac 装机更简单</p>
-        </footer>
+            <footer class="footer">
+                <p>🔔 叮当装 InstallFlow - 让 Mac 装机更简单</p>
+                <p class="footer-sub">轻松、快速、安全的批量应用安装工具</p>
+            </footer>
+        </div>
     </div>
 
     <script src="assets/js/script.js"></script>

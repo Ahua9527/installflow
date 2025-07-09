@@ -4,10 +4,12 @@
 # 🔔 叮当装 InstallFlow - Mac 批量安装工具
 # 一键批量安装 Mac 应用，让装机像叮当一样简单
 # 
-# 使用方法（推荐第二种，支持交互式选择）：
-# bash <(curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh) "~/Downloads/installers"
-# 或者：
-# bash <(curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh) "/Users/your-name/Downloads/installers"
+# 使用方法：
+# 1. 推荐方式（交互式）：
+#    bash <(curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh)
+# 2. 传统方式（直接指定路径）：
+#    bash <(curl -fsSL https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/refs/heads/main/Scripts/install.sh) "/Users/your-name/Downloads/installers"
+
 # ==============================================================================
 
 set -e
@@ -47,10 +49,9 @@ LOCAL_INSTALLERS_DIR=""  # 用户提供的本地安装包目录
 # 解析命令行参数
 parse_arguments() {
     if [ $# -eq 0 ]; then
-        error "请提供安装包目录路径"
-        echo ""
-        show_help
-        exit 1
+        # 新的交互式模式：提示用户拖拽文件夹
+        prompt_for_folder
+        return
     fi
     
     local installers_path="$1"
@@ -76,8 +77,8 @@ parse_arguments() {
     fi
 }
 
-# 显示欢迎信息
-show_welcome() {
+# 提示用户拖拽文件夹
+prompt_for_folder() {
     echo ""
     echo -e "${BLUE}╔══════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${BLUE}║                                                              ║${NC}"
@@ -88,8 +89,65 @@ show_welcome() {
     echo -e "${BLUE}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     
-    echo -e "${GREEN}📁 本地安装包目录: $LOCAL_INSTALLERS_DIR${NC}"
+    echo -e "${YELLOW}📁 请提供安装包所在的文件夹路径：${NC}"
     echo ""
+    echo -e "${GREEN}💡 操作提示：${NC}"
+    echo "   1. 在 Finder 中找到包含安装包的文件夹"
+    echo "   2. 将文件夹直接拖拽到这个终端窗口"
+    echo "   3. 按回车键确认"
+    echo ""
+    echo -e "${BLUE}📦 支持的文件类型：${NC} .dmg、.pkg、.zip、.app"
+    echo ""
+    
+    while true; do
+        echo -n "请输入或拖拽文件夹路径: "
+        read -r installers_path
+        
+        # 如果用户输入为空，继续提示
+        if [ -z "$installers_path" ]; then
+            echo -e "${YELLOW}⚠️  请输入文件夹路径或将文件夹拖拽到终端窗口${NC}"
+            continue
+        fi
+        
+        # 清理路径（移除可能的引号和空格）
+        installers_path=$(echo "$installers_path" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed 's/^"//;s/"$//')
+        
+        # 展开 ~ 路径
+        installers_path="${installers_path/#\~/$HOME}"
+        
+        # 检查路径是否存在
+        if [ ! -d "$installers_path" ]; then
+            error "指定的目录不存在: $installers_path"
+            echo -e "${YELLOW}请重新输入正确的文件夹路径${NC}"
+            echo ""
+            continue
+        fi
+        
+        # 检查目录中是否有安装包
+        local package_count=$(find "$installers_path" -name "*.dmg" -o -name "*.pkg" -o -name "*.zip" -o -name "*.app" | wc -l)
+        
+        if [ "$package_count" -eq 0 ]; then
+            error "指定目录中没有找到安装包文件 (.dmg, .pkg, .zip, .app)"
+            echo -e "${YELLOW}请选择包含安装包的文件夹${NC}"
+            echo ""
+            continue
+        else
+            LOCAL_INSTALLERS_DIR="$installers_path"
+            log "✅ 发现 $package_count 个安装包文件"
+            echo ""
+            break
+        fi
+    done
+}
+
+# 显示欢迎信息
+show_welcome() {
+    # 如果是交互式模式，不显示欢迎信息（已经在 prompt_for_folder 中显示了）
+    if [ -n "$LOCAL_INSTALLERS_DIR" ]; then
+        echo ""
+        echo -e "${GREEN}📁 本地安装包目录: $LOCAL_INSTALLERS_DIR${NC}"
+        echo ""
+    fi
 }
 
 # 检查Gatekeeper状态
@@ -996,13 +1054,43 @@ process_packages() {
 run_installation() {
     log "开始执行安装..."
     
-    # 提前验证sudo权限
+    # 提前验证sudo权限，提供更友好的提示
     echo ""
-    info "此脚本需要管理员权限来安装软件包和推出DMG文件。"
-    if ! sudo -v; then
-        error "无法获取管理员权限，安装终止"
-        exit 1
-    fi
+    echo -e "${BLUE}🔐 权限验证${NC}"
+    echo "================================"
+    echo -e "${YELLOW}📋 说明：${NC}"
+    echo "   • 安装应用程序需要管理员权限"
+    echo "   • 用于挂载/推出DMG文件和复制应用到 Applications 文件夹"
+    echo "   • 支持密码输入和 Touch ID 验证"
+    echo ""
+    
+    info "请输入管理员密码或使用 Touch ID 验证："
+    
+    # 尝试获取 sudo 权限，最多尝试3次
+    local attempts=0
+    local max_attempts=3
+    
+    while [ $attempts -lt $max_attempts ]; do
+        if sudo -v; then
+            log "✅ 管理员权限验证成功"
+            break
+        else
+            ((attempts++))
+            if [ $attempts -lt $max_attempts ]; then
+                echo -e "${YELLOW}验证失败，请重试 (剩余 $((max_attempts - attempts)) 次机会)${NC}"
+            else
+                error "无法获取管理员权限，安装终止"
+                echo -e "${YELLOW}💡 请确保：${NC}"
+                echo "   • 当前用户具有管理员权限"
+                echo "   • 正确输入了管理员密码"
+                echo "   • 或使用 Touch ID 进行验证"
+                exit 1
+            fi
+        fi
+    done
+    
+    echo "================================"
+    echo ""
     
     # 保持sudo权限有效
     while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
@@ -1027,13 +1115,14 @@ cleanup() {
 show_help() {
     echo "🔔 叮当装 InstallFlow - Mac 批量安装工具"
     echo ""
-    echo "用法: $0 [选项] <安装包目录>"
+    echo "用法: $0 [选项] [安装包目录]"
     echo ""
     echo "选项："
     echo "  -h, --help     显示此帮助信息"
     echo ""
     echo "参数："
-    echo "  安装包目录     包含 .dmg/.pkg/.zip 文件的目录路径（必需）"
+    echo "  安装包目录     包含 .dmg/.pkg/.zip/.app 文件的目录路径（可选）"
+    echo "                如果不提供，将进入交互式模式提示用户输入"
     echo ""
     echo "功能："
     echo "  • 🎯 交互式选择界面，默认全选所有软件包"
@@ -1047,9 +1136,9 @@ show_help() {
     echo "  • 🚀 自动安装所有选中的软件包"
     echo ""
     echo "示例："
-    echo "  $0 /Users/fiber/dev/install_workflow/installers"
-    echo "  $0 ~/Downloads/mac_apps"
-    echo "  $0 /path/to/your/software/packages"
+    echo "  $0                                          # 交互式模式"
+    echo "  $0 /Users/fiber/dev/install_workflow/installers   # 直接指定路径"
+    echo "  $0 ~/Downloads/mac_apps                     # 使用相对路径"
     echo ""
 }
 
