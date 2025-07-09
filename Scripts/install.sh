@@ -244,59 +244,6 @@ check_gatekeeper_status() {
     fi
 }
 
-# 安装完成后的Gatekeeper检查
-final_gatekeeper_check() {
-    local final_status=$(spctl --status 2>/dev/null)
-    
-    if [ "$final_status" = "assessments disabled" ]; then
-        echo ""
-        echo -e "${BLUE}🔒 安全提醒${NC}"
-        echo "================================"
-        echo -e "${YELLOW}⚠️  Gatekeeper当前处于关闭状态${NC}"
-        echo ""
-        echo -e "${BLUE}💡 建议：${NC}"
-        echo "   为了系统安全，建议重新启用Gatekeeper"
-        echo ""
-        echo -e "${GREEN}🔧 重新启用命令：${NC}"
-        echo -e "   ${BLUE}sudo spctl --master-enable${NC}"
-        echo ""
-        echo -e "${YELLOW}📝 说明：${NC}"
-        echo "   • 重新启用后，系统会重新验证应用签名"
-        echo "   • 已安装的应用不受影响，仍可正常运行"
-        echo "   • 新安装的未签名应用需要手动确认"
-        echo ""
-        
-        # 询问是否立即重新启用
-        while true; do
-            read -p "是否现在重新启用Gatekeeper？[默认: y] (y/n): " -r reenable_choice
-            case $reenable_choice in
-                [Nn]*)
-                    echo ""
-                    echo -e "${YELLOW}📝 记住稍后手动启用：${NC}"
-                    echo -e "   ${BLUE}sudo spctl --master-enable${NC}"
-                    echo ""
-                    break
-                    ;;
-                [Yy]*|"")
-                    echo ""
-                    echo -e "${BLUE}正在重新启用Gatekeeper...${NC}"
-                    if sudo spctl --master-enable 2>/dev/null; then
-                        echo -e "${GREEN}✅ Gatekeeper已重新启用${NC}"
-                        echo -e "${GREEN}🔒 系统安全性已恢复${NC}"
-                    else
-                        echo -e "${RED}❌ 重新启用失败，可能需要管理员权限${NC}"
-                    fi
-                    echo ""
-                    break
-                    ;;
-                *)
-                    echo "请输入 y (是) 或 n (否)"
-                    ;;
-            esac
-        done
-        echo "================================"
-    fi
-}
 
 # 检查系统要求
 check_requirements() {
@@ -338,7 +285,7 @@ interactive_package_selector() {
     done
     
     local cursor=0
-    local page_size=10
+    local page_size=50
     local page_start=0
     
     # 隐藏光标并启用原始模式
@@ -1176,10 +1123,9 @@ run_direct_installation() {
     echo -e "${YELLOW}📋 说明：${NC}"
     echo "   • 安装应用程序需要管理员权限"
     echo "   • 用于挂载/推出DMG文件和复制应用到 Applications 文件夹"
-    echo "   • 支持密码输入和 Touch ID 验证"
     echo ""
     
-    info "请输入管理员密码或使用 Touch ID 验证："
+    info "请输入管理员密码："
     
     # 尝试获取 sudo 权限，最多尝试3次
     local attempts=0
@@ -1198,7 +1144,6 @@ run_direct_installation() {
                 echo -e "${YELLOW}💡 请确保：${NC}"
                 echo "   • 当前用户具有管理员权限"
                 echo "   • 正确输入了管理员密码"
-                echo "   • 或使用 Touch ID 进行验证"
                 exit 1
             fi
         fi
@@ -1300,10 +1245,6 @@ main() {
     
     echo ""
     log "🎉 叮当装完成！所有应用已安装完毕！"
-    echo ""
-    
-    # 检查是否需要提醒重新启用Gatekeeper
-    final_gatekeeper_check
     echo ""
 }
 
