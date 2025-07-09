@@ -39,8 +39,7 @@ info() {
     echo -e "${BLUE}[$(date '+%H:%M:%S')] ℹ️  $1${NC}"
 }
 
-# 配置
-TEMP_DIR="/tmp/mac_setup_$(date +%s)"
+# 配置（保留为空，可能在某些地方仍被引用）
 
 # 全局变量
 LOCAL_INSTALLERS_DIR=""  # 用户提供的本地安装包目录
@@ -573,8 +572,18 @@ show_package_menu() {
 # 创建临时目录
 setup_temp_dir() {
     log "创建临时目录..."
-    mkdir -p "$TEMP_DIR/installers"
-    cd "$TEMP_DIR"
+    
+    if ! mkdir -p "$TEMP_DIR/installers"; then
+        error "无法创建临时目录: $TEMP_DIR"
+        exit 1
+    fi
+    
+    log "工作目录: $TEMP_DIR"
+    
+    if ! cd "$TEMP_DIR"; then
+        error "无法切换到临时目录: $TEMP_DIR"
+        exit 1
+    fi
 }
 
 # 创建安装脚本
@@ -586,7 +595,174 @@ create_install_script() {
     chmod +x install.sh
 }
 
-# 创建内置的安装脚本
+# 安装DMG文件
+install_dmg_file() {
+    local installer_path="$1"
+    local filename=$(basename "$installer_path")
+    
+    echo "  [类型: DMG] - 移除隔离属性..."
+    sudo xattr -r -d com.apple.quarantine "$installer_path" 2>/dev/null || true
+    echo "  [类型: DMG] - 正在挂载..."
+    HDIUTIL_OUTPUT=$(sudo hdiutil attach "$installer_path" -nobrowse -owners on 2>&1)
+    HDIUTIL_EXIT_CODE=$?
+    
+    if [ $HDIUTIL_EXIT_CODE -ne 0 ]; then
+        echo "  ❌ 挂载失败: $filename"
+        return
+    fi
+    
+    MOUNT_POINT=$(echo "$HDIUTIL_OUTPUT" | grep '/Volumes/' | tail -1 | sed 's/.*\(\/Volumes\/.*\)$/\1/' | sed 's/[[:space:]]*$//')
+    
+    if [ -z "$MOUNT_POINT" ] || [ ! -d "$MOUNT_POINT" ]; then
+        echo "  ❌ 无法确定挂载点: $filename"
+        return
+    fi
+    
+    echo "  ✅ 已挂载到: $MOUNT_POINT"
+    
+    # 查找PKG文件
+    PKG_PATH=""
+    if [ -f "$MOUNT_POINT"/*.pkg ]; then
+        PKG_PATH=$(echo "$MOUNT_POINT"/*.pkg | head -1)
+    fi
+    
+    # 安装PKG（如果存在）
+    if [ -n "$PKG_PATH" ] && [ -f "$PKG_PATH" ]; then
+        PKG_NAME=$(basename "$PKG_PATH")
+        echo "  📦 发现PKG安装包: $PKG_NAME"
+        echo "  📦 正在安装PKG..."
+        
+        if sudo installer -pkg "$PKG_PATH" -target /; then
+            echo "  ✅ PKG安装成功"
+        else
+            echo "  ❌ PKG安装失败"
+        fi
+    fi
+    
+    # 查找并安装.app文件（只有在没有PKG时）
+    if [ -z "$PKG_PATH" ]; then
+        echo "  🔍 查找 .app 文件..."
+        
+        APP_PATH=""
+        if [ -d "$MOUNT_POINT"/*.app ]; then
+            APP_PATH=$(echo "$MOUNT_POINT"/*.app | head -1)
+        fi
+        
+        if [ -n "$APP_PATH" ]; then
+            # 常规DMG包含.app文件
+            APP_NAME=$(basename "$APP_PATH")
+            TARGET_APP_PATH="/Applications/$APP_NAME"
+            echo "  ✅ 找到应用: $APP_NAME"
+            
+            if [ -d "$TARGET_APP_PATH" ]; then
+                echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
+            else
+                echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
+                sudo cp -R "$APP_PATH" "/Applications/"
+                echo "  ✅ 拷贝完成。"
+                
+                # 移除应用的隔离属性
+                echo "  正在移除应用的隔离属性..."
+                sudo xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
+                echo "  ✅ 隔离属性移除完成。"
+            fi
+        else
+            echo "  ❌ 未找到 .app 文件"
+            # 这里可以添加TNT特殊结构处理，但为了简化先跳过
+        fi
+    fi
+    
+    # 推出DMG
+    echo "  正在推出DMG: $filename..."
+    sleep 1
+    if sudo hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null; then
+        echo "  ✅ DMG推出完成。"
+    else
+        sudo hdiutil detach "$MOUNT_POINT" -force -quiet 2>/dev/null || true
+        echo "  ✅ DMG强制推出完成。"
+    fi
+}
+
+# 安装PKG文件
+install_pkg_file() {
+    local installer_path="$1"
+    local filename=$(basename "$installer_path")
+    
+    echo "  [类型: PKG] - 准备安装..."
+    sudo installer -pkg "$installer_path" -target /
+    echo "  ✅ PKG 安装成功。"
+}
+
+# 安装APP文件
+install_app_file() {
+    local installer_path="$1"
+    local filename=$(basename "$installer_path")
+    
+    echo "  [类型: APP] - 直接安装应用..."
+    APP_NAME=$(basename "$installer_path")
+    TARGET_APP_PATH="/Applications/$APP_NAME"
+    
+    if [ -d "$TARGET_APP_PATH" ]; then
+        echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
+    else
+        echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
+        sudo cp -R "$installer_path" "/Applications/"
+        echo "  ✅ 拷贝完成。"
+        
+        # 移除应用的隔离属性
+        echo "  正在移除应用的隔离属性..."
+        sudo xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
+        echo "  ✅ 隔离属性移除完成。"
+    fi
+}
+
+# 安装ZIP文件
+install_zip_file() {
+    local installer_path="$1"
+    local filename=$(basename "$installer_path")
+    
+    echo "  [类型: ZIP] - 移除隔离属性..."
+    sudo xattr -r -d com.apple.quarantine "$installer_path" 2>/dev/null || true
+    echo "  [类型: ZIP] - 正在解压..."
+    
+    # 创建临时解压目录
+    local temp_extract="/tmp/zip_extract_$$"
+    mkdir -p "$temp_extract"
+    
+    unzip -q "$installer_path" -d "$temp_extract"
+    
+    # 在解压后的内容中移除隔离属性
+    sudo xattr -r -d com.apple.quarantine "$temp_extract" 2>/dev/null || true
+    
+    # 查找 .app 文件
+    APP_PATH=$(find "$temp_extract" -name "*.app" -maxdepth 5 -print -quit)
+    
+    if [ -n "$APP_PATH" ]; then
+        APP_NAME=$(basename "$APP_PATH")
+        TARGET_APP_PATH="/Applications/$APP_NAME"
+        echo "  🔍 找到应用: $APP_NAME"
+        
+        if [ -d "$TARGET_APP_PATH" ]; then
+            echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
+        else
+            echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
+            sudo cp -R "$APP_PATH" "/Applications/"
+            echo "  ✅ 拷贝完成。"
+            
+            # 移除应用的隔离属性
+            echo "  正在移除应用的隔离属性..."
+            sudo xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
+            echo "  ✅ 隔离属性移除完成。"
+        fi
+    else
+        echo "  ❌ 在ZIP中未找到 .app 文件。"
+    fi
+    
+    # 清理临时目录
+    rm -rf "$temp_extract"
+}
+
+# 创建内置的安装脚本（保留用于兼容性，但不再使用）
 create_embedded_install_script() {
     cat > install.sh << 'EOF'
 #!/bin/bash
@@ -642,35 +818,15 @@ for installer_path in "$INSTALLERS_DIR"/*; do
       
       echo "  ✅ 已挂载到: $MOUNT_POINT"
       
-      # 显示DMG内容以便调试
-      echo "  📁 DMG内容："
-      ls -la "$MOUNT_POINT" 2>/dev/null | head -10
-      echo ""
       
-      # 第一步：检查是否有PKG文件（优先处理安装器）
-      echo "  🔍 Step 1: 查找 PKG 安装包..."
-      
-      # 检查挂载点是否仍然存在
-      if [ ! -d "$MOUNT_POINT" ]; then
-        echo "  ❌ 挂载点已失效: $MOUNT_POINT"
-        continue
+      # 查找PKG文件
+      PKG_PATH=""
+      if [ -f "$MOUNT_POINT"/*.pkg ]; then
+        PKG_PATH=$(echo "$MOUNT_POINT"/*.pkg | head -1)
       fi
       
-      # 简化的PKG查找逻辑，使用更快的方式
-      echo "  [调试] 正在搜索: $MOUNT_POINT"
-      PKG_PATH=$(ls "$MOUNT_POINT"/*.pkg 2>/dev/null | head -1)
-      echo "  [调试] 第一次搜索结果: $PKG_PATH"
-      
-      # 如果ls没找到，尝试在子目录中查找
-      if [ -z "$PKG_PATH" ]; then
-        PKG_PATH=$(ls "$MOUNT_POINT"/*/*.pkg 2>/dev/null | head -1)
-        echo "  [调试] 第二次搜索结果: $PKG_PATH"
-      fi
-      
-      echo "  [调试] 最终PKG_PATH: $PKG_PATH"
-      
-      if [ -n "$PKG_PATH" ]; then
-        # DMG包含PKG安装包
+      # 安装PKG（如果存在）
+      if [ -n "$PKG_PATH" ] && [ -f "$PKG_PATH" ]; then
         PKG_NAME=$(basename "$PKG_PATH")
         echo "  📦 发现PKG安装包: $PKG_NAME"
         echo "  📦 正在安装PKG..."
@@ -680,30 +836,17 @@ for installer_path in "$INSTALLERS_DIR"/*; do
         else
           echo "  ❌ PKG安装失败"
         fi
-      else
-        echo "  ℹ️  未发现PKG安装包"
       fi
       
-      # 第二步：只有在没有PKG时才查找.app文件
+      # 查找并安装.app文件（只有在没有PKG时）
       if [ -z "$PKG_PATH" ]; then
-        echo "  🔍 Step 2: 查找 .app 文件..."
+        echo "  🔍 查找 .app 文件..."
         
-        # 再次检查挂载点
-        if [ ! -d "$MOUNT_POINT" ]; then
-          echo "  ❌ 挂载点已失效: $MOUNT_POINT"
-          continue
-        fi
-        
-        # 使用简单快速的.app文件查找
-        APP_PATH=$(ls -d "$MOUNT_POINT"/*.app 2>/dev/null | head -1)
-        
-        # 如果ls没找到，尝试在子目录中查找
-        if [ -z "$APP_PATH" ]; then
-          APP_PATH=$(ls -d "$MOUNT_POINT"/*/*.app 2>/dev/null | head -1)
+        APP_PATH=""
+        if [ -d "$MOUNT_POINT"/*.app ]; then
+          APP_PATH=$(echo "$MOUNT_POINT"/*.app | head -1)
         fi
       else
-        echo "  ℹ️  Step 2: 已找到PKG安装包，跳过.app文件安装"
-        echo "  💡 PKG安装包通常包含完整的应用程序，无需额外安装.app文件"
         APP_PATH=""
       fi
       
@@ -1070,8 +1213,8 @@ process_packages() {
     handle_local_packages
 }
 
-# 执行安装
-run_installation() {
+# 直接安装选中的文件
+run_direct_installation() {
     log "开始执行安装..."
     
     # 提前验证sudo权限，提供更友好的提示
@@ -1115,20 +1258,63 @@ run_installation() {
     # 保持sudo权限有效
     while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
     
-    if [[ -f "install.sh" ]]; then
-        bash install.sh
-    else
-        error "安装脚本不存在"
-        exit 1
-    fi
+    echo ""
+    echo "🔔 叮当装正在为您安装应用..."
+    echo "========================================"
+    
+    # 直接处理选中的文件
+    for installer_path in "${selected_local_files[@]}"; do
+        [ -e "$installer_path" ] || continue
+        
+        filename=$(basename "$installer_path")
+        extension="${filename##*.}"
+        
+        echo ""
+        echo "----------------------------------------"
+        echo "⚙️  正在处理: $filename"
+        echo "----------------------------------------"
+        
+        # 直接调用安装逻辑
+        case "$extension" in
+            "dmg")
+                install_dmg_file "$installer_path"
+                ;;
+            "pkg")
+                install_pkg_file "$installer_path"
+                ;;
+            "zip")
+                install_zip_file "$installer_path"
+                ;;
+            "app")
+                install_app_file "$installer_path"
+                ;;
+            *)
+                echo "  🟡 [类型: $extension] - 跳过，不支持的文件类型。"
+                ;;
+        esac
+    done
+    
+    echo ""
+    echo "========================================"
+    echo "✅ 所有软件安装任务已执行完毕！"
+    echo "========================================"
 }
 
 # 清理临时文件
 cleanup() {
-    log "清理临时文件..."
-    cd /
-    rm -rf "$TEMP_DIR"
-    log "清理完成"
+    if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
+        if [ "$KEEP_TEMP_FILES" = true ]; then
+            log "保留临时文件用于调试: $TEMP_DIR"
+        else
+            log "清理临时文件..."
+            cd /
+            if rm -rf "$TEMP_DIR"; then
+                log "清理完成: $TEMP_DIR"
+            else
+                warn "清理临时目录失败: $TEMP_DIR"
+            fi
+        fi
+    fi
 }
 
 # 显示使用帮助
@@ -1173,12 +1359,8 @@ main() {
     parse_arguments "$@"
     show_welcome
     check_requirements
-    setup_temp_dir
     show_package_menu
-    create_install_script
-    process_packages
-    run_installation
-    cleanup
+    run_direct_installation
     
     echo ""
     log "🎉 叮当装完成！所有应用已安装完毕！"
