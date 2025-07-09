@@ -39,7 +39,6 @@ info() {
     echo -e "${BLUE}[$(date '+%H:%M:%S')] ℹ️  $1${NC}"
 }
 
-# 配置（保留为空，可能在某些地方仍被引用）
 
 # 全局变量
 LOCAL_INSTALLERS_DIR=""  # 用户提供的本地安装包目录
@@ -569,22 +568,6 @@ show_package_menu() {
     analyze_local_packages
 }
 
-# 创建临时目录
-setup_temp_dir() {
-    log "创建临时目录..."
-    
-    if ! mkdir -p "$TEMP_DIR/installers"; then
-        error "无法创建临时目录: $TEMP_DIR"
-        exit 1
-    fi
-    
-    log "工作目录: $TEMP_DIR"
-    
-    if ! cd "$TEMP_DIR"; then
-        error "无法切换到临时目录: $TEMP_DIR"
-        exit 1
-    fi
-}
 
 # 创建安装脚本
 create_install_script() {
@@ -1181,37 +1164,6 @@ echo "========================================"
 EOF
 }
 
-# 处理本地安装包
-handle_local_packages() {
-    
-    log "复制本地安装包到工作目录..."
-    
-    for file in "${selected_local_files[@]}"; do
-        local filename=$(basename "$file")
-        local extension="${filename##*.}"
-        info "复制 $filename"
-        
-        # .app文件是目录，需要递归复制
-        if [ "$extension" = "app" ]; then
-            if cp -R "$file" "installers/$filename"; then
-                log "✅ $filename 复制完成"
-            else
-                warn "❌ $filename 复制失败"
-            fi
-        else
-            if cp "$file" "installers/$filename"; then
-                log "✅ $filename 复制完成"
-            else
-                warn "❌ $filename 复制失败"
-            fi
-        fi
-    done
-}
-
-# 处理选中的软件包
-process_packages() {
-    handle_local_packages
-}
 
 # 直接安装选中的文件
 run_direct_installation() {
@@ -1300,22 +1252,6 @@ run_direct_installation() {
     echo "========================================"
 }
 
-# 清理临时文件
-cleanup() {
-    if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
-        if [ "$KEEP_TEMP_FILES" = true ]; then
-            log "保留临时文件用于调试: $TEMP_DIR"
-        else
-            log "清理临时文件..."
-            cd /
-            if rm -rf "$TEMP_DIR"; then
-                log "清理完成: $TEMP_DIR"
-            else
-                warn "清理临时目录失败: $TEMP_DIR"
-            fi
-        fi
-    fi
-}
 
 # 显示使用帮助
 show_help() {
@@ -1371,8 +1307,6 @@ main() {
     echo ""
 }
 
-# 错误处理
-trap cleanup EXIT
 
 # 运行主函数
 main "$@"
