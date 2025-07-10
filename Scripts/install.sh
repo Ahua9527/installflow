@@ -601,92 +601,46 @@ create_install_script() {
 }
 
 
-# 处理加密的DMG文件（保留原有逻辑用于重试）
+# 处理加密的DMG文件（仅用于用户手动输入密码的情况）
 handle_encrypted_dmg() {
     local installer_path="$1"
     local filename=$(basename "$installer_path")
-    local passwords=("" "123" "password" "1234" "000000" "123456" "888888" "admin" "user" "test")
     
-    echo "  🔐 尝试常见密码解密加密DMG..."
-    echo "  💡 提示: 如果密码都不正确，将自动跳过此文件"
+    echo "  🔐 检测到加密DMG文件: $filename"
+    echo "  💡 此文件需要密码才能打开，请手动输入密码："
     
-    local attempt_count=0
-    local max_attempts=${#passwords[@]}
-    
-    for password in "${passwords[@]}"; do
-        ((attempt_count++))
+    # 提示用户手动输入密码
+    while true; do
+        echo ""
+        read -p "  请输入密码 (直接回车跳过): " -r user_password
         
-        if [ -z "$password" ]; then
-            echo "  🔓 [$attempt_count/$max_attempts] 尝试空密码..."
-            password_display="(空密码)"
-        else
-            echo "  🔓 [$attempt_count/$max_attempts] 尝试密码: $password"
-            password_display="$password"
+        if [ -z "$user_password" ]; then
+            echo "  ⏭️  跳过此加密文件"
+            return 1
         fi
         
-        # 使用更可靠的方法尝试密码
-        local mount_result=""
-        local exit_code=1
+        echo "  🔓 正在尝试用户提供的密码..."
         
-        # 方法1: 优先使用printf+stdinpass（最稳定）
+        # 使用用户提供的密码尝试挂载
+        local mount_result
         mount_result=$(timeout 20 bash -c "
-            printf '%s\n' '$password' | sudo hdiutil attach '$installer_path' -stdinpass -nobrowse -owners on 2>&1
+            printf '%s\n' '$user_password' | sudo hdiutil attach '$installer_path' -stdinpass -nobrowse -owners on 2>&1
         " 2>/dev/null)
-        exit_code=$?
-        
-        # 方法2: 如果方法1失败且expect可用，尝试expect
-        if [ $exit_code -ne 0 ] && command -v expect >/dev/null 2>&1; then
-            mount_result=$(timeout 25 expect -c "
-                set timeout 15
-                log_user 0
-                spawn sudo hdiutil attach \"$installer_path\" -nobrowse -owners on
-                expect {
-                    \"*assword:*\" { 
-                        send \"$password\r\"
-                        expect {
-                            \"*mounted*\" { puts \"SUCCESS\" }
-                            \"*Volumes*\" { puts \"SUCCESS\" }
-                            timeout { puts \"TIMEOUT\" }
-                            eof
-                        }
-                    }
-                    \"*passphrase*\" { 
-                        send \"$password\r\"
-                        expect {
-                            \"*mounted*\" { puts \"SUCCESS\" }
-                            \"*Volumes*\" { puts \"SUCCESS\" }
-                            timeout { puts \"TIMEOUT\" }
-                            eof
-                        }
-                    }
-                    timeout { puts \"TIMEOUT\" }
-                    eof
-                }
-            " 2>&1)
-            exit_code=$?
-        fi
+        local exit_code=$?
         
         # 检查是否成功挂载
-        if [ $exit_code -eq 0 ] && (echo "$mount_result" | grep -q "/Volumes/" || echo "$mount_result" | grep -q "SUCCESS"); then
-            echo "  ✅ 密码正确: $password_display"
-            # 重新获取挂载信息
-            HDIUTIL_OUTPUT=$(mount | grep "$(basename "$installer_path" .dmg)" | tail -1)
-            if [ -z "$HDIUTIL_OUTPUT" ]; then
-                HDIUTIL_OUTPUT="$mount_result"
-            fi
+        if [ $exit_code -eq 0 ] && echo "$mount_result" | grep -q "/Volumes/"; then
+            echo "  ✅ 密码正确，DMG已成功挂载"
+            HDIUTIL_OUTPUT="$mount_result"
             return 0
-        elif [ $exit_code -eq 124 ] || echo "$mount_result" | grep -q "TIMEOUT"; then
-            echo "  ⏰ 密码尝试超时: $password_display"
+        elif [ $exit_code -eq 124 ]; then
+            echo "  ⏰ 挂载超时，请重试"
             continue
         else
-            echo "  ❌ 密码错误: $password_display"
+            echo "  ❌ 密码错误，请重新输入"
             continue
         fi
     done
-    
-    echo "  ❌ 尝试了 $max_attempts 个常见密码，都无法解密"
-    echo "  💡 建议：稍后手动处理此加密文件"
-    return 1
 }
 
 # 安全推出DMG函数
@@ -1522,13 +1476,13 @@ handle_encrypted_dmg_retry() {
     echo ""
     echo -e "${BLUE}💡 选项说明：${NC}"
     echo "  • 这些文件需要密码才能打开"
-    echo "  • 可以选择重试安装（会尝试常见密码）"
+    echo "  • 可以选择重试安装（需要您手动输入密码）"
     echo "  • 或者稍后手动处理"
     echo ""
     
     while true; do
         echo -e "${YELLOW}是否要重试安装这些加密DMG文件？${NC} [y/n/s]"
-        echo "  y) 是，尝试重试安装"
+        echo "  y) 是，尝试重试安装（需要手动输入密码）"
         echo "  n) 否，跳过这些文件"
         echo "  s) 显示详细文件路径"
         echo ""
@@ -1538,6 +1492,7 @@ handle_encrypted_dmg_retry() {
             [Yy]*)
                 echo ""
                 echo -e "${BLUE}🔄 开始重试加密DMG文件...${NC}"
+                echo -e "${YELLOW}💡 提示：每个文件都需要您手动输入密码${NC}"
                 echo "========================================"
                 
                 for dmg_file in "${encrypted_dmg_files[@]}"; do
@@ -1602,8 +1557,8 @@ handle_encrypted_dmg_retry() {
                             failed_installs+=("$filename (加密DMG重试，无法确定挂载点)")
                         fi
                     else
-                        echo "  ❌ 重试失败，无法解密"
-                        failed_installs+=("$filename (加密DMG重试失败)")
+                        echo "  ❌ 重试失败或用户跳过"
+                        failed_installs+=("$filename (加密DMG重试失败或跳过)")
                     fi
                 done
                 
