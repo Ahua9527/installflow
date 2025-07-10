@@ -691,14 +691,14 @@ install_dmg_file() {
     sudo xattr -r -d com.apple.quarantine "$installer_path" 2>/dev/null || true
     echo "  [类型: DMG] - 正在尝试挂载（使用空密码）..."
     
-    # 统一使用空密码尝试挂载所有DMG文件
-    HDIUTIL_OUTPUT=$(printf '\n' | sudo hdiutil attach "$installer_path" -stdinpass -nobrowse -owners on 2>&1)
+    # 统一使用空密码尝试挂载所有DMG文件（添加超时保护）
+    HDIUTIL_OUTPUT=$(timeout 30 bash -c "printf '\n' | sudo hdiutil attach '$installer_path' -stdinpass -nobrowse -owners on 2>&1")
     HDIUTIL_EXIT_CODE=$?
     
     # 检查挂载结果
     if [ $HDIUTIL_EXIT_CODE -ne 0 ]; then
-        # 精确检测"认证错误"，表示需要密码
-        if echo "$HDIUTIL_OUTPUT" | grep -q "认证错误\|Authentication error\|authentication failed"; then
+        # 检测超时或认证错误，表示需要密码
+        if [ $HDIUTIL_EXIT_CODE -eq 124 ] || echo "$HDIUTIL_OUTPUT" | grep -q "认证错误\|Authentication error\|authentication failed"; then
             echo "  🔐 检测到加密DMG文件（需要密码），自动跳过"
             echo "  💡 提示：此文件将在安装完成后询问您是否重试"
             encrypted_dmg_files+=("$installer_path")
