@@ -600,50 +600,99 @@ create_install_script() {
     chmod +x install.sh
 }
 
+# 安全执行命令的包装函数，确保不会卡住
+safe_execute() {
+    local timeout_seconds="$1"
+    local description="$2"
+    shift 2
+    local command=("$@")
+    
+    echo "    ⏰ $description (最多等待 ${timeout_seconds}s)..."
+    
+    # 使用timeout和额外的进程控制
+    local result
+    local exit_code
+    
+    result=$(timeout "$timeout_seconds" bash -c "${command[*]}" 2>&1)
+    exit_code=$?
+    
+    if [ $exit_code -eq 124 ]; then
+        echo "    ⚠️  操作超时: $description"
+        return 124
+    elif [ $exit_code -eq 0 ]; then
+        echo "    ✅ 操作成功: $description"
+        echo "$result"
+        return 0
+    else
+        echo "    ❌ 操作失败: $description (退出码: $exit_code)"
+        echo "$result"
+        return $exit_code
+    fi
+}
+
 # 检测DMG是否加密
 is_dmg_encrypted() {
     local installer_path="$1"
     
-    # 方法1: 使用hdiutil imageinfo检测DMG是否加密（最安全的方法）
+    echo "    🔍 步骤1: 检查DMG文件信息..."
+    
+    # 方法1: 使用hdiutil imageinfo检测DMG是否加密（最安全、最快的方法）
     local info_output
-    info_output=$(timeout 10 hdiutil imageinfo "$installer_path" 2>/dev/null)
+    info_output=$(timeout 15 hdiutil imageinfo "$installer_path" 2>/dev/null)
     local info_exit_code=$?
     
     # 检查是否包含加密相关关键词
-    if [ $info_exit_code -eq 0 ] && echo "$info_output" | grep -q -i "encrypted\|password\|passphrase"; then
-        return 0  # 是加密的
+    if [ $info_exit_code -eq 0 ]; then
+        if echo "$info_output" | grep -q -i "encrypted.*true\|password.*required\|passphrase.*required"; then
+            echo "    ✅ 通过文件信息确认为加密DMG"
+            return 0  # 是加密的
+        elif echo "$info_output" | grep -q -i "encrypted.*false\|no.*password\|no.*passphrase"; then
+            echo "    ✅ 通过文件信息确认为非加密DMG"
+            return 1  # 不是加密的
+        fi
     fi
     
-    # 方法2: 尝试以只读方式挂载来检测（添加更多保护措施）
+    echo "    🔍 步骤2: 尝试快速挂载测试..."
+    
+    # 方法2: 尝试快速挂载测试（更保守的方法）
     local test_mount_result
-    # 使用 -stdinpass 和 /dev/null 避免交互式密码输入
-    test_mount_result=$(timeout 8 bash -c "echo '' | sudo hdiutil attach '$installer_path' -stdinpass -nobrowse -readonly -verify -mountpoint /tmp/dmg_test_$$ 2>&1" 2>/dev/null)
+    # 使用随机挂载点避免冲突
+    local random_mount="/tmp/dmg_test_$(date +%s)_$$"
+    
+    test_mount_result=$(timeout 10 bash -c "
+        echo '' | sudo hdiutil attach '$installer_path' -stdinpass -nobrowse -readonly -mountpoint '$random_mount' 2>&1
+    " 2>/dev/null)
     local test_exit_code=$?
     
     # 如果挂载成功，立即推出
     if [ $test_exit_code -eq 0 ]; then
-        local test_mount_point="/tmp/dmg_test_$$"
-        if [ -d "$test_mount_point" ]; then
-            sudo hdiutil detach "$test_mount_point" -quiet 2>/dev/null || true
-            sudo rmdir "$test_mount_point" 2>/dev/null || true
+        if [ -d "$random_mount" ]; then
+            sudo hdiutil detach "$random_mount" -quiet 2>/dev/null || true
+            sudo rmdir "$random_mount" 2>/dev/null || true
         fi
+        echo "    ✅ 快速挂载成功，确认为非加密DMG"
         return 1  # 不是加密的
     fi
     
     # 检查错误信息是否包含密码相关信息
-    if echo "$test_mount_result" | grep -q -i "authentication error\|passphrase\|password\|encrypted\|requires.*password"; then
+    if echo "$test_mount_result" | grep -q -i "authentication.*error\|passphrase.*required\|password.*required\|encrypted.*image\|requires.*password"; then
+        echo "    ✅ 挂载失败信息显示为加密DMG"
         return 0  # 是加密的
     fi
     
-    # 方法3: 如果上述方法都无法确定，使用hdiutil verify检测
+    echo "    🔍 步骤3: 文件验证检测..."
+    
+    # 方法3: 使用hdiutil verify检测（最后的检测方法）
     local verify_result
-    verify_result=$(timeout 5 hdiutil verify "$installer_path" 2>&1)
+    verify_result=$(timeout 8 hdiutil verify "$installer_path" 2>&1)
     local verify_exit_code=$?
     
-    if [ $verify_exit_code -ne 0 ] && echo "$verify_result" | grep -q -i "authentication error\|passphrase\|password\|encrypted"; then
+    if [ $verify_exit_code -ne 0 ] && echo "$verify_result" | grep -q -i "authentication.*error\|passphrase\|password.*required\|encrypted"; then
+        echo "    ✅ 验证检测确认为加密DMG"
         return 0  # 是加密的
     fi
     
+    echo "    ⚠️  无法明确确定加密状态，按非加密处理"
     return 1  # 不是加密的或无法确定（默认按非加密处理）
 }
 
@@ -796,11 +845,35 @@ install_dmg_file() {
     sudo xattr -r -d com.apple.quarantine "$installer_path" 2>/dev/null || true
     echo "  [类型: DMG] - 正在挂载..."
     
-    # 使用更可靠的挂载方式，添加超时保护
-    HDIUTIL_OUTPUT=$(timeout 30 bash -c "
-        sudo hdiutil attach '$installer_path' -nobrowse -owners on 2>&1
-    " 2>/dev/null)
-    HDIUTIL_EXIT_CODE=$?
+    # 使用安全的挂载方式，确保不会卡住
+    echo "  🔄 尝试方式1: 非交互式挂载..."
+    HDIUTIL_OUTPUT=""
+    HDIUTIL_EXIT_CODE=1
+    
+    # 方式1: 使用stdinpass避免密码提示
+    if safe_execute 25 "非交互式DMG挂载" "echo '' | sudo hdiutil attach '$installer_path' -stdinpass -nobrowse -owners on -noautoopen" >/dev/null 2>&1; then
+        HDIUTIL_OUTPUT=$(mount | grep "$(basename "$installer_path" .dmg)" | tail -1)
+        HDIUTIL_EXIT_CODE=0
+    else
+        echo "  🔄 尝试方式2: 强制非交互式挂载..."
+        # 方式2: 使用-plist输出避免交互
+        if safe_execute 20 "强制非交互式DMG挂载" "sudo hdiutil attach '$installer_path' -nobrowse -owners on -plist" >/dev/null 2>&1; then
+            HDIUTIL_OUTPUT=$(mount | grep "$(basename "$installer_path" .dmg)" | tail -1)
+            HDIUTIL_EXIT_CODE=0
+        else
+            echo "  🔄 尝试方式3: 最简挂载..."
+            # 方式3: 最简单的挂载方式
+            safe_execute 15 "最简DMG挂载" "sudo hdiutil attach '$installer_path' -nobrowse" 2>&1 | tee /tmp/dmg_output_$$
+            if [ ${PIPESTATUS[0]} -eq 0 ]; then
+                HDIUTIL_OUTPUT=$(cat /tmp/dmg_output_$$)
+                HDIUTIL_EXIT_CODE=0
+            else
+                HDIUTIL_OUTPUT=$(cat /tmp/dmg_output_$$)
+                HDIUTIL_EXIT_CODE=1
+            fi
+            rm -f /tmp/dmg_output_$$
+        fi
+    fi
     
     # 如果挂载失败，再次检查是否是加密DMG（双重保险）
     if [ $HDIUTIL_EXIT_CODE -ne 0 ]; then
