@@ -601,46 +601,44 @@ create_install_script() {
 }
 
 
-# 处理加密的DMG文件（仅用于用户手动输入密码的情况）
+# 处理加密的DMG文件（使用原生hdiutil attach，支持密码错误2次后自动跳过）
 handle_encrypted_dmg() {
     local installer_path="$1"
     local filename=$(basename "$installer_path")
     
     echo "  🔐 检测到加密DMG文件: $filename"
-    echo "  💡 此文件需要密码才能打开，请手动输入密码："
+    echo "  💡 此文件需要密码才能打开，您有2次输入机会"
     
-    # 提示用户手动输入密码
-    while true; do
+    local attempt_count=0
+    local max_attempts=2
+    
+    # 给用户2次密码输入机会
+    while [ $attempt_count -lt $max_attempts ]; do
+        ((attempt_count++))
         echo ""
-        read -p "  请输入密码 (直接回车跳过): " -r user_password
+        echo "  尝试 $attempt_count/$max_attempts"
         
-        if [ -z "$user_password" ]; then
-            echo "  ⏭️  跳过此加密文件"
-            return 1
-        fi
+        # 使用原生hdiutil attach让用户直接输入密码
+        echo "  🔓 正在挂载DMG，请输入密码..."
         
-        echo "  🔓 正在尝试用户提供的密码..."
-        
-        # 使用用户提供的密码尝试挂载
-        local mount_result
-        mount_result=$(timeout 20 bash -c "
-            printf '%s\n' '$user_password' | sudo hdiutil attach '$installer_path' -stdinpass -nobrowse -owners on 2>&1
-        " 2>/dev/null)
-        local exit_code=$?
-        
-        # 检查是否成功挂载
-        if [ $exit_code -eq 0 ] && echo "$mount_result" | grep -q "/Volumes/"; then
+        if sudo hdiutil attach "$installer_path" -nobrowse -owners on; then
             echo "  ✅ 密码正确，DMG已成功挂载"
-            HDIUTIL_OUTPUT="$mount_result"
+            # 获取挂载点信息
+            HDIUTIL_OUTPUT=$(mount | grep "$(basename "$installer_path" .dmg)" | tail -1)
             return 0
-        elif [ $exit_code -eq 124 ]; then
-            echo "  ⏰ 挂载超时，请重试"
-            continue
         else
-            echo "  ❌ 密码错误，请重新输入"
-            continue
+            echo "  ❌ 密码错误或挂载失败 (尝试 $attempt_count/$max_attempts)"
+            
+            if [ $attempt_count -lt $max_attempts ]; then
+                echo "  💡 您还有 $((max_attempts - attempt_count)) 次机会"
+            else
+                echo "  ⏭️  已达到最大尝试次数，自动跳过此文件"
+                return 1
+            fi
         fi
     done
+    
+    return 1
 }
 
 # 安全推出DMG函数
@@ -691,20 +689,20 @@ install_dmg_file() {
     
     echo "  [类型: DMG] - 移除隔离属性..."
     sudo xattr -r -d com.apple.quarantine "$installer_path" 2>/dev/null || true
-    echo "  [类型: DMG] - 正在挂载..."
+    echo "  [类型: DMG] - 正在尝试挂载（使用空密码）..."
     
-    # 简单有效的方法：直接用空密码尝试挂载，如果需要密码就跳过
-    HDIUTIL_OUTPUT=$(timeout 30 bash -c "printf '\n' | sudo hdiutil attach '$installer_path' -stdinpass -nobrowse -owners on 2>&1")
+    # 统一使用空密码尝试挂载所有DMG文件
+    HDIUTIL_OUTPUT=$(printf '\n' | sudo hdiutil attach "$installer_path" -stdinpass -nobrowse -owners on 2>&1)
     HDIUTIL_EXIT_CODE=$?
     
-    # 如果挂载失败，再次检查是否是加密DMG（双重保险）
+    # 检查挂载结果
     if [ $HDIUTIL_EXIT_CODE -ne 0 ]; then
-        # 如果超时或者包含密码相关错误，就认为是加密文件
-        if [ $HDIUTIL_EXIT_CODE -eq 124 ] || echo "$HDIUTIL_OUTPUT" | grep -q -i "authentication\|passphrase\|password\|encrypted"; then
-            echo "  🔐 检测到加密DMG文件，自动跳过"
+        # 精确检测"认证错误"，表示需要密码
+        if echo "$HDIUTIL_OUTPUT" | grep -q "认证错误\|Authentication error\|authentication failed"; then
+            echo "  🔐 检测到加密DMG文件（需要密码），自动跳过"
             echo "  💡 提示：此文件将在安装完成后询问您是否重试"
             encrypted_dmg_files+=("$installer_path")
-            bypassed_installs+=("$filename (加密DMG，已跳过)")
+            bypassed_installs+=("$filename (加密DMG，需要密码)")
             return 0
         else
             echo "  ❌ 挂载失败: $filename"
@@ -1476,13 +1474,14 @@ handle_encrypted_dmg_retry() {
     echo ""
     echo -e "${BLUE}💡 选项说明：${NC}"
     echo "  • 这些文件需要密码才能打开"
-    echo "  • 可以选择重试安装（需要您手动输入密码）"
-    echo "  • 或者稍后手动处理"
+    echo "  • 可以选择重试安装（每个文件有2次密码输入机会）"
+    echo "  • 密码错误2次后会自动跳过该文件"
+    echo "  • 或者您可以选择稍后手动处理"
     echo ""
     
     while true; do
         echo -e "${YELLOW}是否要重试安装这些加密DMG文件？${NC} [y/n/s]"
-        echo "  y) 是，尝试重试安装（需要手动输入密码）"
+        echo "  y) 是，尝试重试安装（每个文件2次机会）"
         echo "  n) 否，跳过这些文件"
         echo "  s) 显示详细文件路径"
         echo ""
@@ -1492,7 +1491,7 @@ handle_encrypted_dmg_retry() {
             [Yy]*)
                 echo ""
                 echo -e "${BLUE}🔄 开始重试加密DMG文件...${NC}"
-                echo -e "${YELLOW}💡 提示：每个文件都需要您手动输入密码${NC}"
+                echo -e "${YELLOW}💡 提示：每个文件有2次密码输入机会，错误2次后自动跳过${NC}"
                 echo "========================================"
                 
                 for dmg_file in "${encrypted_dmg_files[@]}"; do
@@ -1557,8 +1556,8 @@ handle_encrypted_dmg_retry() {
                             failed_installs+=("$filename (加密DMG重试，无法确定挂载点)")
                         fi
                     else
-                        echo "  ❌ 重试失败或用户跳过"
-                        failed_installs+=("$filename (加密DMG重试失败或跳过)")
+                        echo "  ❌ 重试失败或密码错误2次后自动跳过"
+                        failed_installs+=("$filename (加密DMG重试失败或密码错误)")
                     fi
                 done
                 
