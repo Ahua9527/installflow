@@ -722,7 +722,10 @@ install_dmg_file() {
     echo "  ✅ 已挂载到: $MOUNT_POINT"
     
     # 查找PKG文件（支持多个PKG）
-    local pkg_files=($(find "$MOUNT_POINT" -maxdepth 1 -name "*.pkg" -type f))
+    local pkg_files=()
+    while IFS= read -r -d '' file; do
+        pkg_files+=("$file")
+    done < <(find "$MOUNT_POINT" -maxdepth 1 -name "*.pkg" -type f -print0)
     local pkg_count=${#pkg_files[@]}
     
     if [ $pkg_count -gt 0 ]; then
@@ -751,7 +754,10 @@ install_dmg_file() {
     if [ $pkg_count -eq 0 ]; then
         echo "  🔍 查找 .app 文件..."
         
-        local app_files=($(find "$MOUNT_POINT" -maxdepth 1 -name "*.app" -type d))
+        local app_files=()
+        while IFS= read -r -d '' file; do
+            app_files+=("$file")
+        done < <(find "$MOUNT_POINT" -maxdepth 1 -name "*.app" -type d -print0)
         local app_count=${#app_files[@]}
         
         if [ $app_count -gt 0 ]; then
@@ -1510,7 +1516,10 @@ handle_encrypted_dmg_retry() {
                         
                         if [ -n "$mount_point" ] && [ -d "$mount_point" ]; then
                             # 执行安装逻辑（简化版）
-                            local pkg_files=($(find "$mount_point" -maxdepth 1 -name "*.pkg" -type f))
+                            local pkg_files=()
+                            while IFS= read -r -d '' file; do
+                                pkg_files+=("$file")
+                            done < <(find "$mount_point" -maxdepth 1 -name "*.pkg" -type f -print0)
                             if [ ${#pkg_files[@]} -gt 0 ]; then
                                 for pkg_file in "${pkg_files[@]}"; do
                                     local pkg_name=$(basename "$pkg_file")
@@ -1524,7 +1533,10 @@ handle_encrypted_dmg_retry() {
                                     fi
                                 done
                             else
-                                local app_files=($(find "$mount_point" -maxdepth 1 -name "*.app" -type d))
+                                local app_files=()
+                                while IFS= read -r -d '' file; do
+                                    app_files+=("$file")
+                                done < <(find "$mount_point" -maxdepth 1 -name "*.app" -type d -print0)
                                 if [ ${#app_files[@]} -gt 0 ]; then
                                     for app_path in "${app_files[@]}"; do
                                         local app_name=$(basename "$app_path")
