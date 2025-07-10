@@ -604,81 +604,124 @@ create_install_script() {
 is_dmg_encrypted() {
     local installer_path="$1"
     
-    # 使用hdiutil imageinfo检测DMG是否加密
+    # 方法1: 使用hdiutil imageinfo检测DMG是否加密（最安全的方法）
     local info_output
-    info_output=$(hdiutil imageinfo "$installer_path" 2>/dev/null)
+    info_output=$(timeout 10 hdiutil imageinfo "$installer_path" 2>/dev/null)
+    local info_exit_code=$?
     
     # 检查是否包含加密相关关键词
-    if echo "$info_output" | grep -q -i "encrypted\|password\|passphrase"; then
+    if [ $info_exit_code -eq 0 ] && echo "$info_output" | grep -q -i "encrypted\|password\|passphrase"; then
         return 0  # 是加密的
     fi
     
-    # 尝试直接挂载来检测（更准确的方法）
+    # 方法2: 尝试以只读方式挂载来检测（添加更多保护措施）
     local test_mount_result
-    test_mount_result=$(timeout 5 sudo hdiutil attach "$installer_path" -nobrowse -readonly -verify 2>&1)
+    # 使用 -stdinpass 和 /dev/null 避免交互式密码输入
+    test_mount_result=$(timeout 8 bash -c "echo '' | sudo hdiutil attach '$installer_path' -stdinpass -nobrowse -readonly -verify -mountpoint /tmp/dmg_test_$$ 2>&1" 2>/dev/null)
     local test_exit_code=$?
     
     # 如果挂载成功，立即推出
     if [ $test_exit_code -eq 0 ]; then
-        local test_mount_point
-        test_mount_point=$(echo "$test_mount_result" | grep '/Volumes/' | tail -1 | sed 's/.*\(\/Volumes\/.*\)$/\1/' | sed 's/[[:space:]]*$//')
-        if [ -n "$test_mount_point" ] && [ -d "$test_mount_point" ]; then
+        local test_mount_point="/tmp/dmg_test_$$"
+        if [ -d "$test_mount_point" ]; then
             sudo hdiutil detach "$test_mount_point" -quiet 2>/dev/null || true
+            sudo rmdir "$test_mount_point" 2>/dev/null || true
         fi
         return 1  # 不是加密的
     fi
     
     # 检查错误信息是否包含密码相关信息
-    if echo "$test_mount_result" | grep -q -i "authentication error\|passphrase\|password\|encrypted"; then
+    if echo "$test_mount_result" | grep -q -i "authentication error\|passphrase\|password\|encrypted\|requires.*password"; then
         return 0  # 是加密的
     fi
     
-    return 1  # 不是加密的
+    # 方法3: 如果上述方法都无法确定，使用hdiutil verify检测
+    local verify_result
+    verify_result=$(timeout 5 hdiutil verify "$installer_path" 2>&1)
+    local verify_exit_code=$?
+    
+    if [ $verify_exit_code -ne 0 ] && echo "$verify_result" | grep -q -i "authentication error\|passphrase\|password\|encrypted"; then
+        return 0  # 是加密的
+    fi
+    
+    return 1  # 不是加密的或无法确定（默认按非加密处理）
 }
 
 # 处理加密的DMG文件（保留原有逻辑用于重试）
 handle_encrypted_dmg() {
     local installer_path="$1"
     local filename=$(basename "$installer_path")
-    local passwords=("" "123" "password" "1234" "000000" "123456" "888888")
+    local passwords=("" "123" "password" "1234" "000000" "123456" "888888" "admin" "user" "test")
     
-    echo "  🔐 检测到加密DMG，尝试常见密码..."
+    echo "  🔐 尝试常见密码解密加密DMG..."
+    echo "  💡 提示: 如果密码都不正确，将自动跳过此文件"
+    
+    local attempt_count=0
+    local max_attempts=${#passwords[@]}
     
     for password in "${passwords[@]}"; do
+        ((attempt_count++))
+        
         if [ -z "$password" ]; then
-            echo "  🔓 尝试空密码..."
+            echo "  🔓 [$attempt_count/$max_attempts] 尝试空密码..."
             password_display="(空密码)"
         else
-            echo "  🔓 尝试密码: $password"
+            echo "  🔓 [$attempt_count/$max_attempts] 尝试密码: $password"
             password_display="$password"
         fi
         
-        # 使用timeout来避免挂起，并使用expect来自动处理密码输入
+        # 使用更可靠的方法尝试密码
         local mount_result=""
-        if command -v expect >/dev/null 2>&1; then
-            # 使用expect处理密码输入
-            mount_result=$(timeout 30 expect -c "
-                set timeout 10
+        local exit_code=1
+        
+        # 方法1: 优先使用printf+stdinpass（最稳定）
+        mount_result=$(timeout 20 bash -c "
+            printf '%s\n' '$password' | sudo hdiutil attach '$installer_path' -stdinpass -nobrowse -owners on 2>&1
+        " 2>/dev/null)
+        exit_code=$?
+        
+        # 方法2: 如果方法1失败且expect可用，尝试expect
+        if [ $exit_code -ne 0 ] && command -v expect >/dev/null 2>&1; then
+            mount_result=$(timeout 25 expect -c "
+                set timeout 15
+                log_user 0
                 spawn sudo hdiutil attach \"$installer_path\" -nobrowse -owners on
                 expect {
-                    \"*assword:*\" { send \"$password\r\"; exp_continue }
-                    \"*passphrase*\" { send \"$password\r\"; exp_continue }
+                    \"*assword:*\" { 
+                        send \"$password\r\"
+                        expect {
+                            \"*mounted*\" { puts \"SUCCESS\" }
+                            \"*Volumes*\" { puts \"SUCCESS\" }
+                            timeout { puts \"TIMEOUT\" }
+                            eof
+                        }
+                    }
+                    \"*passphrase*\" { 
+                        send \"$password\r\"
+                        expect {
+                            \"*mounted*\" { puts \"SUCCESS\" }
+                            \"*Volumes*\" { puts \"SUCCESS\" }
+                            timeout { puts \"TIMEOUT\" }
+                            eof
+                        }
+                    }
+                    timeout { puts \"TIMEOUT\" }
                     eof
                 }
             " 2>&1)
-        else
-            # 降级使用printf，但添加超时保护
-            mount_result=$(timeout 15 bash -c "printf '%s\n' '$password' | sudo hdiutil attach '$installer_path' -stdinpass -nobrowse -owners on" 2>&1)
+            exit_code=$?
         fi
         
-        local exit_code=$?
-        
         # 检查是否成功挂载
-        if [ $exit_code -eq 0 ] && echo "$mount_result" | grep -q "/Volumes/"; then
+        if [ $exit_code -eq 0 ] && (echo "$mount_result" | grep -q "/Volumes/" || echo "$mount_result" | grep -q "SUCCESS"); then
             echo "  ✅ 密码正确: $password_display"
-            HDIUTIL_OUTPUT="$mount_result"
+            # 重新获取挂载信息
+            HDIUTIL_OUTPUT=$(mount | grep "$(basename "$installer_path" .dmg)" | tail -1)
+            if [ -z "$HDIUTIL_OUTPUT" ]; then
+                HDIUTIL_OUTPUT="$mount_result"
+            fi
             return 0
-        elif [ $exit_code -eq 124 ]; then
+        elif [ $exit_code -eq 124 ] || echo "$mount_result" | grep -q "TIMEOUT"; then
             echo "  ⏰ 密码尝试超时: $password_display"
             continue
         else
@@ -687,8 +730,50 @@ handle_encrypted_dmg() {
         fi
     done
     
-    echo "  ❌ 所有常见密码尝试失败"
+    echo "  ❌ 尝试了 $max_attempts 个常见密码，都无法解密"
+    echo "  💡 建议：稍后手动处理此加密文件"
     return 1
+}
+
+# 安全推出DMG函数
+safe_detach_dmg() {
+    local mount_point="$1"
+    local filename="$2"
+    
+    if [ -z "$mount_point" ] || [ ! -d "$mount_point" ]; then
+        echo "  ⚠️  挂载点无效，跳过推出: $mount_point"
+        return 0
+    fi
+    
+    echo "  正在推出DMG: $filename..."
+    sleep 2  # 给系统一些时间完成文件操作
+    
+    # 尝试1: 优雅推出
+    if timeout 15 sudo hdiutil detach "$mount_point" -quiet 2>/dev/null; then
+        echo "  ✅ DMG推出完成"
+        return 0
+    fi
+    
+    echo "  ⏰ 优雅推出超时，尝试强制推出..."
+    
+    # 尝试2: 强制推出
+    if timeout 10 sudo hdiutil detach "$mount_point" -force -quiet 2>/dev/null; then
+        echo "  ✅ DMG强制推出完成"
+        return 0
+    fi
+    
+    echo "  ⚠️  强制推出也失败，尝试清理挂载点..."
+    
+    # 尝试3: 检查并手动清理
+    if mount | grep -q "$mount_point"; then
+        echo "  🔧 挂载点仍然存在，尝试umount..."
+        sudo umount "$mount_point" 2>/dev/null || true
+        sleep 1
+        sudo hdiutil detach "$mount_point" -force -quiet 2>/dev/null || true
+    fi
+    
+    echo "  ✅ DMG推出处理完成（可能需要手动检查）"
+    return 0
 }
 
 # 安装DMG文件
@@ -710,12 +795,21 @@ install_dmg_file() {
     echo "  [类型: DMG] - 移除隔离属性..."
     sudo xattr -r -d com.apple.quarantine "$installer_path" 2>/dev/null || true
     echo "  [类型: DMG] - 正在挂载..."
-    HDIUTIL_OUTPUT=$(sudo hdiutil attach "$installer_path" -nobrowse -owners on 2>&1)
+    
+    # 使用更可靠的挂载方式，添加超时保护
+    HDIUTIL_OUTPUT=$(timeout 30 bash -c "
+        sudo hdiutil attach '$installer_path' -nobrowse -owners on 2>&1
+    " 2>/dev/null)
     HDIUTIL_EXIT_CODE=$?
     
     # 如果挂载失败，再次检查是否是加密DMG（双重保险）
     if [ $HDIUTIL_EXIT_CODE -ne 0 ]; then
-        if echo "$HDIUTIL_OUTPUT" | grep -q "Authentication error\|passphrase\|password"; then
+        if [ $HDIUTIL_EXIT_CODE -eq 124 ]; then
+            echo "  ⏰ DMG挂载超时，可能是加密文件，自动跳过"
+            encrypted_dmg_files+=("$installer_path")
+            bypassed_installs+=("$filename (DMG挂载超时，疑似加密)")
+            return 0
+        elif echo "$HDIUTIL_OUTPUT" | grep -q -i "authentication error\|passphrase\|password\|encrypted\|requires.*password"; then
             echo "  🔐 运行时检测到加密DMG文件，自动跳过"
             echo "  💡 提示：此文件将在安装完成后询问您是否重试"
             encrypted_dmg_files+=("$installer_path")
@@ -810,15 +904,8 @@ install_dmg_file() {
         fi
     fi
     
-    # 推出DMG
-    echo "  正在推出DMG: $filename..."
-    sleep 1
-    if sudo hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null; then
-        echo "  ✅ DMG推出完成。"
-    else
-        sudo hdiutil detach "$MOUNT_POINT" -force -quiet 2>/dev/null || true
-        echo "  ✅ DMG强制推出完成。"
-    fi
+    # 安全推出DMG
+    safe_detach_dmg "$MOUNT_POINT" "$filename"
 }
 
 # 检查PKG是否已安装
@@ -1571,9 +1658,8 @@ handle_encrypted_dmg_retry() {
                                 fi
                             fi
                             
-                            # 推出DMG
-                            echo "  正在推出DMG..."
-                            sudo hdiutil detach "$mount_point" -quiet 2>/dev/null || sudo hdiutil detach "$mount_point" -force -quiet 2>/dev/null || true
+                            # 安全推出DMG
+                            safe_detach_dmg "$mount_point" "$filename"
                         else
                             echo "  ❌ 无法确定挂载点"
                             failed_installs+=("$filename (加密DMG重试，无法确定挂载点)")
