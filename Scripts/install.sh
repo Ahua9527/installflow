@@ -43,6 +43,12 @@ info() {
 # 全局变量
 LOCAL_INSTALLERS_DIR=""  # 用户提供的本地安装包目录
 
+# 安装结果追踪数组
+declare -a successful_installs=()    # 成功安装的应用
+declare -a bypassed_installs=()      # 跳过的安装（已存在、加密绕过等）
+declare -a failed_installs=()        # 失败的安装
+declare -a encrypted_dmg_files=()    # 跳过的加密DMG文件列表
+
 
 # 解析命令行参数
 parse_arguments() {
@@ -245,6 +251,72 @@ check_gatekeeper_status() {
 }
 
 
+# 检查Rosetta状态并安装
+check_rosetta_status() {
+    # 检查是否为Apple Silicon Mac
+    local arch=$(uname -m)
+    if [[ "$arch" != "arm64" ]]; then
+        log "检测到Intel Mac，无需Rosetta"
+        return 0
+    fi
+    
+    log "检测到Apple Silicon Mac，正在检查Rosetta状态..."
+    
+    # 检查Rosetta是否已安装
+    if arch -x86_64 /usr/bin/true 2>/dev/null; then
+        log "✅ Rosetta已安装"
+        return 0
+    fi
+    
+    echo ""
+    echo -e "${BLUE}🔄 Rosetta检测${NC}"
+    echo "================================"
+    echo -e "${YELLOW}⚠️  Rosetta未安装${NC}"
+    echo ""
+    echo -e "${BLUE}💡 说明：${NC}"
+    echo "   • 检测到Apple Silicon Mac，但未安装Rosetta"
+    echo "   • 某些应用可能需要Rosetta才能运行"
+    echo "   • 建议现在安装Rosetta以确保兼容性"
+    echo ""
+    
+    # 询问用户是否要安装Rosetta
+    while true; do
+        read -p "是否要安装Rosetta？[默认: y] (y/n): " -r rosetta_choice
+        case $rosetta_choice in
+            [Nn]*)
+                echo ""
+                echo -e "${YELLOW}跳过Rosetta安装${NC}"
+                echo -e "${YELLOW}⚠️  注意：某些Intel应用可能无法运行${NC}"
+                echo ""
+                break
+                ;;
+            [Yy]*|"")
+                echo ""
+                echo -e "${BLUE}正在安装Rosetta...${NC}"
+                echo -e "${YELLOW}💡 提示：安装过程可能需要几分钟时间${NC}"
+                echo ""
+                
+                if sudo softwareupdate --install-rosetta --agree-to-license; then
+                    echo ""
+                    echo -e "${GREEN}✅ Rosetta安装成功${NC}"
+                    log "Rosetta安装完成"
+                else
+                    echo ""
+                    echo -e "${RED}❌ Rosetta安装失败${NC}"
+                    warn "继续安装可能导致某些应用无法运行"
+                fi
+                echo ""
+                break
+                ;;
+            *)
+                echo "请输入 y (是) 或 n (否)"
+                ;;
+        esac
+    done
+    echo "================================"
+    echo ""
+}
+
 # 检查系统要求
 check_requirements() {
     log "检查系统要求..."
@@ -256,6 +328,9 @@ check_requirements() {
     fi
     
     log "系统检查通过"
+    
+    # 检查Rosetta状态
+    check_rosetta_status
     
     # 检查Gatekeeper状态
     check_gatekeeper_status
@@ -525,10 +600,112 @@ create_install_script() {
     chmod +x install.sh
 }
 
+# 检测DMG是否加密
+is_dmg_encrypted() {
+    local installer_path="$1"
+    
+    # 使用hdiutil imageinfo检测DMG是否加密
+    local info_output
+    info_output=$(hdiutil imageinfo "$installer_path" 2>/dev/null)
+    
+    # 检查是否包含加密相关关键词
+    if echo "$info_output" | grep -q -i "encrypted\|password\|passphrase"; then
+        return 0  # 是加密的
+    fi
+    
+    # 尝试直接挂载来检测（更准确的方法）
+    local test_mount_result
+    test_mount_result=$(timeout 5 sudo hdiutil attach "$installer_path" -nobrowse -readonly -verify 2>&1)
+    local test_exit_code=$?
+    
+    # 如果挂载成功，立即推出
+    if [ $test_exit_code -eq 0 ]; then
+        local test_mount_point
+        test_mount_point=$(echo "$test_mount_result" | grep '/Volumes/' | tail -1 | sed 's/.*\(\/Volumes\/.*\)$/\1/' | sed 's/[[:space:]]*$//')
+        if [ -n "$test_mount_point" ] && [ -d "$test_mount_point" ]; then
+            sudo hdiutil detach "$test_mount_point" -quiet 2>/dev/null || true
+        fi
+        return 1  # 不是加密的
+    fi
+    
+    # 检查错误信息是否包含密码相关信息
+    if echo "$test_mount_result" | grep -q -i "authentication error\|passphrase\|password\|encrypted"; then
+        return 0  # 是加密的
+    fi
+    
+    return 1  # 不是加密的
+}
+
+# 处理加密的DMG文件（保留原有逻辑用于重试）
+handle_encrypted_dmg() {
+    local installer_path="$1"
+    local filename=$(basename "$installer_path")
+    local passwords=("" "123" "password" "1234" "000000" "123456" "888888")
+    
+    echo "  🔐 检测到加密DMG，尝试常见密码..."
+    
+    for password in "${passwords[@]}"; do
+        if [ -z "$password" ]; then
+            echo "  🔓 尝试空密码..."
+            password_display="(空密码)"
+        else
+            echo "  🔓 尝试密码: $password"
+            password_display="$password"
+        fi
+        
+        # 使用timeout来避免挂起，并使用expect来自动处理密码输入
+        local mount_result=""
+        if command -v expect >/dev/null 2>&1; then
+            # 使用expect处理密码输入
+            mount_result=$(timeout 30 expect -c "
+                set timeout 10
+                spawn sudo hdiutil attach \"$installer_path\" -nobrowse -owners on
+                expect {
+                    \"*assword:*\" { send \"$password\r\"; exp_continue }
+                    \"*passphrase*\" { send \"$password\r\"; exp_continue }
+                    eof
+                }
+            " 2>&1)
+        else
+            # 降级使用printf，但添加超时保护
+            mount_result=$(timeout 15 bash -c "printf '%s\n' '$password' | sudo hdiutil attach '$installer_path' -stdinpass -nobrowse -owners on" 2>&1)
+        fi
+        
+        local exit_code=$?
+        
+        # 检查是否成功挂载
+        if [ $exit_code -eq 0 ] && echo "$mount_result" | grep -q "/Volumes/"; then
+            echo "  ✅ 密码正确: $password_display"
+            HDIUTIL_OUTPUT="$mount_result"
+            return 0
+        elif [ $exit_code -eq 124 ]; then
+            echo "  ⏰ 密码尝试超时: $password_display"
+            continue
+        else
+            echo "  ❌ 密码错误: $password_display"
+            continue
+        fi
+    done
+    
+    echo "  ❌ 所有常见密码尝试失败"
+    return 1
+}
+
 # 安装DMG文件
 install_dmg_file() {
     local installer_path="$1"
     local filename=$(basename "$installer_path")
+    
+    echo "  [类型: DMG] - 检测是否为加密DMG..."
+    
+    # 先检测是否为加密DMG
+    if is_dmg_encrypted "$installer_path"; then
+        echo "  🔐 检测到加密DMG文件，自动跳过"
+        echo "  💡 提示：此文件将在安装完成后询问您是否重试"
+        encrypted_dmg_files+=("$installer_path")
+        bypassed_installs+=("$filename (加密DMG，已跳过)")
+        return 0
+    fi
     
     echo "  [类型: DMG] - 移除隔离属性..."
     sudo xattr -r -d com.apple.quarantine "$installer_path" 2>/dev/null || true
@@ -536,9 +713,20 @@ install_dmg_file() {
     HDIUTIL_OUTPUT=$(sudo hdiutil attach "$installer_path" -nobrowse -owners on 2>&1)
     HDIUTIL_EXIT_CODE=$?
     
+    # 如果挂载失败，再次检查是否是加密DMG（双重保险）
     if [ $HDIUTIL_EXIT_CODE -ne 0 ]; then
-        echo "  ❌ 挂载失败: $filename"
-        return
+        if echo "$HDIUTIL_OUTPUT" | grep -q "Authentication error\|passphrase\|password"; then
+            echo "  🔐 运行时检测到加密DMG文件，自动跳过"
+            echo "  💡 提示：此文件将在安装完成后询问您是否重试"
+            encrypted_dmg_files+=("$installer_path")
+            bypassed_installs+=("$filename (加密DMG，运行时跳过)")
+            return 0
+        else
+            echo "  ❌ 挂载失败: $filename"
+            echo "  错误信息: $HDIUTIL_OUTPUT"
+            failed_installs+=("$filename (DMG挂载失败)")
+            return 1
+        fi
     fi
     
     MOUNT_POINT=$(echo "$HDIUTIL_OUTPUT" | grep '/Volumes/' | tail -1 | sed 's/.*\(\/Volumes\/.*\)$/\1/' | sed 's/[[:space:]]*$//')
@@ -550,55 +738,75 @@ install_dmg_file() {
     
     echo "  ✅ 已挂载到: $MOUNT_POINT"
     
-    # 查找PKG文件
-    PKG_PATH=""
-    if [ -f "$MOUNT_POINT"/*.pkg ]; then
-        PKG_PATH=$(echo "$MOUNT_POINT"/*.pkg | head -1)
-    fi
+    # 查找PKG文件（支持多个PKG）
+    local pkg_files=($(find "$MOUNT_POINT" -maxdepth 1 -name "*.pkg" -type f))
+    local pkg_count=${#pkg_files[@]}
     
-    # 安装PKG（如果存在）
-    if [ -n "$PKG_PATH" ] && [ -f "$PKG_PATH" ]; then
-        PKG_NAME=$(basename "$PKG_PATH")
-        echo "  📦 发现PKG安装包: $PKG_NAME"
-        echo "  📦 正在安装PKG..."
-        
-        if sudo installer -pkg "$PKG_PATH" -target /; then
-            echo "  ✅ PKG安装成功"
+    if [ $pkg_count -gt 0 ]; then
+        if [ $pkg_count -gt 1 ]; then
+            echo "  📦 发现多个PKG安装包: $pkg_count 个"
+            bypassed_installs+=("$filename (异常: 包含$pkg_count个PKG文件)")
         else
-            echo "  ❌ PKG安装失败"
+            echo "  📦 发现PKG安装包: $(basename "${pkg_files[0]}")"
         fi
+        
+        for pkg_file in "${pkg_files[@]}"; do
+            local pkg_name=$(basename "$pkg_file")
+            echo "  📦 正在安装PKG: $pkg_name"
+            
+            if sudo installer -pkg "$pkg_file" -target /; then
+                echo "  ✅ PKG安装成功: $pkg_name"
+                successful_installs+=("$pkg_name (从DMG中的PKG)")
+            else
+                echo "  ❌ PKG安装失败: $pkg_name"
+                failed_installs+=("$filename (DMG中的PKG安装失败: $pkg_name)")
+            fi
+        done
     fi
     
     # 查找并安装.app文件（只有在没有PKG时）
-    if [ -z "$PKG_PATH" ]; then
+    if [ $pkg_count -eq 0 ]; then
         echo "  🔍 查找 .app 文件..."
         
-        APP_PATH=""
-        if [ -d "$MOUNT_POINT"/*.app ]; then
-            APP_PATH=$(echo "$MOUNT_POINT"/*.app | head -1)
-        fi
+        local app_files=($(find "$MOUNT_POINT" -maxdepth 1 -name "*.app" -type d))
+        local app_count=${#app_files[@]}
         
-        if [ -n "$APP_PATH" ]; then
-            # 常规DMG包含.app文件
-            APP_NAME=$(basename "$APP_PATH")
-            TARGET_APP_PATH="/Applications/$APP_NAME"
-            echo "  ✅ 找到应用: $APP_NAME"
-            
-            if [ -d "$TARGET_APP_PATH" ]; then
-                echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
+        if [ $app_count -gt 0 ]; then
+            if [ $app_count -gt 1 ]; then
+                echo "  📱 发现多个应用: $app_count 个"
+                bypassed_installs+=("$filename (异常: 包含$app_count个.app文件)")
             else
-                echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
-                sudo cp -R "$APP_PATH" "/Applications/"
-                echo "  ✅ 拷贝完成。"
-                
-                # 移除应用的隔离属性
-                echo "  正在移除应用的隔离属性..."
-                sudo xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
-                echo "  ✅ 隔离属性移除完成。"
+                echo "  📱 发现应用: $(basename "${app_files[0]}")"
             fi
+            
+            for app_path in "${app_files[@]}"; do
+                local app_name=$(basename "$app_path")
+                local target_app_path="/Applications/$app_name"
+                echo "  ✅ 处理应用: $app_name"
+                
+                if [ -d "$target_app_path" ]; then
+                    echo "  🟡 应用 '$app_name' 已存在，跳过安装。"
+                    bypassed_installs+=("$filename (应用已存在: $app_name)")
+                else
+                    echo "  正在将 '$app_name' 拷贝到 /Applications ..."
+                    if sudo cp -R "$app_path" "/Applications/"; then
+                        echo "  ✅ 拷贝完成: $app_name"
+                        
+                        # 移除应用的隔离属性
+                        echo "  正在移除应用的隔离属性..."
+                        sudo xattr -r -d com.apple.quarantine "$target_app_path" 2>/dev/null || true
+                        echo "  ✅ 隔离属性移除完成: $app_name"
+                        
+                        successful_installs+=("$app_name (从DMG)")
+                    else
+                        echo "  ❌ 拷贝失败: $app_name"
+                        failed_installs+=("$filename (应用拷贝失败: $app_name)")
+                    fi
+                fi
+            done
         else
             echo "  ❌ 未找到 .app 文件"
-            # 这里可以添加TNT特殊结构处理，但为了简化先跳过
+            failed_installs+=("$filename (DMG中未找到.app文件)")
         fi
     fi
     
@@ -613,14 +821,66 @@ install_dmg_file() {
     fi
 }
 
+# 检查PKG是否已安装
+check_pkg_installation() {
+    local installer_path="$1"
+    local filename=$(basename "$installer_path")
+    
+    echo "  🔍 检查PKG是否已安装..."
+    
+    # 创建临时目录来提取PKG信息
+    local temp_dir="/tmp/pkg_check_$$"
+    mkdir -p "$temp_dir"
+    
+    # 尝试提取PKG信息
+    if pkgutil --expand-full "$installer_path" "$temp_dir" 2>/dev/null; then
+        # 查找PackageInfo文件来获取包标识符
+        local package_info=$(find "$temp_dir" -name "PackageInfo" -type f | head -1)
+        if [ -n "$package_info" ] && [ -f "$package_info" ]; then
+            # 提取包标识符
+            local pkg_id=$(grep -o 'identifier="[^"]*"' "$package_info" | sed 's/identifier="//;s/"//' | head -1)
+            
+            if [ -n "$pkg_id" ]; then
+                echo "  📦 包标识符: $pkg_id"
+                
+                # 检查包是否已安装
+                if pkgutil --pkg-info "$pkg_id" >/dev/null 2>&1; then
+                    echo "  🟡 PKG '$pkg_id' 已安装，跳过安装。"
+                    bypassed_installs+=("$filename (PKG已安装: $pkg_id)")
+                    rm -rf "$temp_dir"
+                    return 1
+                fi
+            fi
+        fi
+    fi
+    
+    rm -rf "$temp_dir"
+    return 0
+}
+
 # 安装PKG文件
 install_pkg_file() {
     local installer_path="$1"
     local filename=$(basename "$installer_path")
     
     echo "  [类型: PKG] - 准备安装..."
-    sudo installer -pkg "$installer_path" -target /
-    echo "  ✅ PKG 安装成功。"
+    
+    # 检查PKG是否已安装
+    if ! check_pkg_installation "$installer_path"; then
+        return 0
+    fi
+    
+    echo "  📦 正在安装PKG..."
+    if sudo installer -pkg "$installer_path" -target /; then
+        echo "  ✅ PKG 安装成功。"
+        
+        # 尝试获取包名用于记录
+        local pkg_name=$(basename "$installer_path" .pkg)
+        successful_installs+=("$pkg_name (PKG)")
+    else
+        echo "  ❌ PKG 安装失败。"
+        failed_installs+=("$filename (PKG安装失败)")
+    fi
 }
 
 # 安装APP文件
@@ -634,15 +894,22 @@ install_app_file() {
     
     if [ -d "$TARGET_APP_PATH" ]; then
         echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
+        bypassed_installs+=("$filename (应用已存在: $APP_NAME)")
     else
         echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
-        sudo cp -R "$installer_path" "/Applications/"
-        echo "  ✅ 拷贝完成。"
-        
-        # 移除应用的隔离属性
-        echo "  正在移除应用的隔离属性..."
-        sudo xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
-        echo "  ✅ 隔离属性移除完成。"
+        if sudo cp -R "$installer_path" "/Applications/"; then
+            echo "  ✅ 拷贝完成。"
+            
+            # 移除应用的隔离属性
+            echo "  正在移除应用的隔离属性..."
+            sudo xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
+            echo "  ✅ 隔离属性移除完成。"
+            
+            successful_installs+=("$APP_NAME (直接安装)")
+        else
+            echo "  ❌ 拷贝失败"
+            failed_installs+=("$filename (应用拷贝失败: $APP_NAME)")
+        fi
     fi
 }
 
@@ -674,18 +941,26 @@ install_zip_file() {
         
         if [ -d "$TARGET_APP_PATH" ]; then
             echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
+            bypassed_installs+=("$filename (应用已存在: $APP_NAME)")
         else
             echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
-            sudo cp -R "$APP_PATH" "/Applications/"
-            echo "  ✅ 拷贝完成。"
-            
-            # 移除应用的隔离属性
-            echo "  正在移除应用的隔离属性..."
-            sudo xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
-            echo "  ✅ 隔离属性移除完成。"
+            if sudo cp -R "$APP_PATH" "/Applications/"; then
+                echo "  ✅ 拷贝完成。"
+                
+                # 移除应用的隔离属性
+                echo "  正在移除应用的隔离属性..."
+                sudo xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
+                echo "  ✅ 隔离属性移除完成。"
+                
+                successful_installs+=("$APP_NAME (从ZIP)")
+            else
+                echo "  ❌ 拷贝失败"
+                failed_installs+=("$filename (应用拷贝失败: $APP_NAME)")
+            fi
         fi
     else
         echo "  ❌ 在ZIP中未找到 .app 文件。"
+        failed_installs+=("$filename (ZIP中未找到.app文件)")
     fi
     
     # 清理临时目录
@@ -1187,6 +1462,7 @@ run_direct_installation() {
                 ;;
             *)
                 echo "  🟡 [类型: $extension] - 跳过，不支持的文件类型。"
+                bypassed_installs+=("$filename (不支持的文件类型: $extension)")
                 ;;
         esac
     done
@@ -1197,6 +1473,233 @@ run_direct_installation() {
     echo "========================================"
 }
 
+
+# 处理加密DMG重试
+handle_encrypted_dmg_retry() {
+    if [ ${#encrypted_dmg_files[@]} -eq 0 ]; then
+        return 0
+    fi
+    
+    echo ""
+    echo "========================================"
+    echo "🔐 发现加密DMG文件"
+    echo "========================================"
+    echo ""
+    echo -e "${YELLOW}📋 在安装过程中跳过了以下加密DMG文件：${NC}"
+    echo "----------------------------------------"
+    
+    local count=1
+    for dmg_file in "${encrypted_dmg_files[@]}"; do
+        local filename=$(basename "$dmg_file")
+        echo "  $count. $filename"
+        ((count++))
+    done
+    
+    echo ""
+    echo -e "${BLUE}💡 选项说明：${NC}"
+    echo "  • 这些文件需要密码才能打开"
+    echo "  • 可以选择重试安装（会尝试常见密码）"
+    echo "  • 或者稍后手动处理"
+    echo ""
+    
+    while true; do
+        echo -e "${YELLOW}是否要重试安装这些加密DMG文件？${NC} [y/n/s]"
+        echo "  y) 是，尝试重试安装"
+        echo "  n) 否，跳过这些文件"
+        echo "  s) 显示详细文件路径"
+        echo ""
+        read -p "请选择 (y/n/s): " -r choice
+        
+        case $choice in
+            [Yy]*)
+                echo ""
+                echo -e "${BLUE}🔄 开始重试加密DMG文件...${NC}"
+                echo "========================================"
+                
+                for dmg_file in "${encrypted_dmg_files[@]}"; do
+                    local filename=$(basename "$dmg_file")
+                    echo ""
+                    echo "----------------------------------------"
+                    echo "⚙️  重试处理: $filename"
+                    echo "----------------------------------------"
+                    
+                    if handle_encrypted_dmg "$dmg_file"; then
+                        # 成功解密，继续安装逻辑
+                        echo "  ✅ 成功解密，继续安装..."
+                        
+                        # 获取挂载点
+                        local mount_point=$(echo "$HDIUTIL_OUTPUT" | grep '/Volumes/' | tail -1 | sed 's/.*\(\/Volumes\/.*\)$/\1/' | sed 's/[[:space:]]*$//')
+                        
+                        if [ -n "$mount_point" ] && [ -d "$mount_point" ]; then
+                            # 执行安装逻辑（简化版）
+                            local pkg_files=($(find "$mount_point" -maxdepth 1 -name "*.pkg" -type f))
+                            if [ ${#pkg_files[@]} -gt 0 ]; then
+                                for pkg_file in "${pkg_files[@]}"; do
+                                    local pkg_name=$(basename "$pkg_file")
+                                    echo "  📦 正在安装PKG: $pkg_name"
+                                    if sudo installer -pkg "$pkg_file" -target /; then
+                                        echo "  ✅ PKG安装成功: $pkg_name"
+                                        successful_installs+=("$pkg_name (从加密DMG重试)")
+                                    else
+                                        echo "  ❌ PKG安装失败: $pkg_name"
+                                        failed_installs+=("$filename (加密DMG重试，PKG安装失败)")
+                                    fi
+                                done
+                            else
+                                local app_files=($(find "$mount_point" -maxdepth 1 -name "*.app" -type d))
+                                if [ ${#app_files[@]} -gt 0 ]; then
+                                    for app_path in "${app_files[@]}"; do
+                                        local app_name=$(basename "$app_path")
+                                        local target_app_path="/Applications/$app_name"
+                                        if [ -d "$target_app_path" ]; then
+                                            echo "  🟡 应用 '$app_name' 已存在，跳过安装。"
+                                        else
+                                            echo "  正在将 '$app_name' 拷贝到 /Applications ..."
+                                            if sudo cp -R "$app_path" "/Applications/"; then
+                                                echo "  ✅ 拷贝完成: $app_name"
+                                                sudo xattr -r -d com.apple.quarantine "$target_app_path" 2>/dev/null || true
+                                                successful_installs+=("$app_name (从加密DMG重试)")
+                                            else
+                                                echo "  ❌ 拷贝失败: $app_name"
+                                                failed_installs+=("$filename (加密DMG重试，应用拷贝失败)")
+                                            fi
+                                        fi
+                                    done
+                                else
+                                    echo "  ❌ 未找到 .app 或 .pkg 文件"
+                                    failed_installs+=("$filename (加密DMG重试，未找到安装文件)")
+                                fi
+                            fi
+                            
+                            # 推出DMG
+                            echo "  正在推出DMG..."
+                            sudo hdiutil detach "$mount_point" -quiet 2>/dev/null || sudo hdiutil detach "$mount_point" -force -quiet 2>/dev/null || true
+                        else
+                            echo "  ❌ 无法确定挂载点"
+                            failed_installs+=("$filename (加密DMG重试，无法确定挂载点)")
+                        fi
+                    else
+                        echo "  ❌ 重试失败，无法解密"
+                        failed_installs+=("$filename (加密DMG重试失败)")
+                    fi
+                done
+                
+                echo ""
+                echo "========================================"
+                echo "✅ 加密DMG重试完成！"
+                echo "========================================"
+                break
+                ;;
+            [Nn]*)
+                echo ""
+                echo -e "${YELLOW}📝 已跳过加密DMG文件${NC}"
+                echo -e "${BLUE}💡 您可以稍后手动处理这些文件${NC}"
+                break
+                ;;
+            [Ss]*)
+                echo ""
+                echo -e "${BLUE}📁 加密DMG文件详细路径：${NC}"
+                echo "----------------------------------------"
+                local count=1
+                for dmg_file in "${encrypted_dmg_files[@]}"; do
+                    echo "  $count. $dmg_file"
+                    ((count++))
+                done
+                echo ""
+                continue
+                ;;
+            *)
+                echo -e "${RED}请输入有效选项：y (是)、n (否)、s (显示路径)${NC}"
+                echo ""
+                continue
+                ;;
+        esac
+    done
+    
+    echo ""
+}
+
+# 显示安装汇总报告
+show_installation_summary() {
+    echo ""
+    echo "========================================"
+    echo "📋 安装汇总报告"
+    echo "========================================"
+    
+    local total_processed=$((${#successful_installs[@]} + ${#bypassed_installs[@]} + ${#failed_installs[@]}))
+    
+    echo -e "${BLUE}📊 总体统计${NC}"
+    echo "----------------------------------------"
+    echo "  总处理数量: $total_processed"
+    echo "  成功安装: ${#successful_installs[@]}"
+    echo "  跳过安装: ${#bypassed_installs[@]}"
+    echo "  失败安装: ${#failed_installs[@]}"
+    if [ ${#encrypted_dmg_files[@]} -gt 0 ]; then
+        echo "  加密DMG: ${#encrypted_dmg_files[@]}"
+    fi
+    echo ""
+    
+    # 显示成功安装的应用
+    if [ ${#successful_installs[@]} -gt 0 ]; then
+        echo -e "${GREEN}✅ 成功安装 (${#successful_installs[@]})${NC}"
+        echo "----------------------------------------"
+        for app in "${successful_installs[@]}"; do
+            echo "  • $app"
+        done
+        echo ""
+    fi
+    
+    # 显示跳过的安装（包含异常标注）
+    if [ ${#bypassed_installs[@]} -gt 0 ]; then
+        local anomaly_count=0
+        for app in "${bypassed_installs[@]}"; do
+            if [[ "$app" == *"异常:"* ]]; then
+                ((anomaly_count++))
+            fi
+        done
+        
+        if [ $anomaly_count -gt 0 ]; then
+            echo -e "${YELLOW}⏭️  跳过安装 (${#bypassed_installs[@]}) ${RED}⚠️ 包含 $anomaly_count 个异常${NC}"
+        else
+            echo -e "${YELLOW}⏭️  跳过安装 (${#bypassed_installs[@]})${NC}"
+        fi
+        echo "----------------------------------------"
+        
+        for app in "${bypassed_installs[@]}"; do
+            if [[ "$app" == *"异常:"* ]]; then
+                echo -e "  • ${RED}⚠️  $app${NC}"
+            else
+                echo "  • $app"
+            fi
+        done
+        echo ""
+    fi
+    
+    # 显示失败的安装
+    if [ ${#failed_installs[@]} -gt 0 ]; then
+        echo -e "${RED}❌ 失败安装 (${#failed_installs[@]})${NC}"
+        echo "----------------------------------------"
+        for app in "${failed_installs[@]}"; do
+            echo "  • $app"
+        done
+        echo ""
+    fi
+    
+    echo "========================================"
+    
+    # 根据结果显示不同的完成消息
+    if [ ${#failed_installs[@]} -eq 0 ]; then
+        if [ ${#successful_installs[@]} -gt 0 ]; then
+            echo -e "${GREEN}🎉 所有应用安装成功！${NC}"
+        else
+            echo -e "${YELLOW}📝 没有新的应用需要安装${NC}"
+        fi
+    else
+        echo -e "${YELLOW}⚠️  部分应用安装失败，请检查上述失败列表${NC}"
+    fi
+    
+    echo ""
+}
 
 # 显示使用帮助
 show_help() {
@@ -1221,6 +1724,10 @@ show_help() {
     echo "  • 🔐 自动移除应用的隔离属性（quarantine）"
     echo "  • 📦 支持ZIP中的PKG安装包"
     echo "  • 🚀 自动安装所有选中的软件包"
+    echo "  • 🤖 Apple Silicon Mac自动检测并安装Rosetta"
+    echo "  • 🔓 智能绕过加密DMG文件（尝试常见密码）"
+    echo "  • 📊 PKG安装检测，避免重复安装"
+    echo "  • 📋 详细的安装汇总报告"
     echo ""
     echo "示例："
     echo "  $0                                          # 交互式模式"
@@ -1243,9 +1750,11 @@ main() {
     show_package_menu
     run_direct_installation
     
-    echo ""
-    log "🎉 叮当装完成！所有应用已安装完毕！"
-    echo ""
+    # 显示安装汇总报告
+    show_installation_summary
+    
+    # 处理加密DMG重试
+    handle_encrypted_dmg_retry
 }
 
 
