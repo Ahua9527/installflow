@@ -70,7 +70,7 @@ parse_arguments() {
     fi
     
     # 检查目录中是否有安装包
-    local package_count=$(find "$installers_path" -name "*.dmg" -o -name "*.pkg" -o -name "*.zip" | wc -l)
+    local package_count=$(find "$installers_path" \( -name "*.dmg" -o -name "*.pkg" -o -name "*.zip" \) ! -name "._*" ! -name ".DS_Store" | wc -l)
     
     if [ "$package_count" -eq 0 ]; then
         error "指定目录中没有找到安装包文件 (.dmg, .pkg, .zip)"
@@ -128,7 +128,7 @@ prompt_for_folder() {
         fi
         
         # 检查目录中是否有安装包
-        local package_count=$(find "$installers_path" -name "*.dmg" -o -name "*.pkg" -o -name "*.zip" -o -name "*.app" | wc -l)
+        local package_count=$(find "$installers_path" \( -name "*.dmg" -o -name "*.pkg" -o -name "*.zip" -o -name "*.app" \) ! -name "._*" ! -name ".DS_Store" | wc -l)
         
         if [ "$package_count" -eq 0 ]; then
             error "指定目录中没有找到安装包文件 (.dmg, .pkg, .zip, .app)"
@@ -565,7 +565,7 @@ analyze_local_packages() {
     
     # 遍历本地安装包目录（兼容bash 3.x，包括子目录和.app文件）
     local temp_file="/tmp/packages_list_$$"
-    find "$LOCAL_INSTALLERS_DIR" -name "*.dmg" -o -name "*.pkg" -o -name "*.zip" -o -name "*.app" > "$temp_file"
+    find "$LOCAL_INSTALLERS_DIR" \( -name "*.dmg" -o -name "*.pkg" -o -name "*.zip" -o -name "*.app" \) ! -name "._*" ! -name ".DS_Store" > "$temp_file"
     
     while IFS= read -r file; do
         if [ -n "$file" ]; then
@@ -655,7 +655,7 @@ safe_detach_dmg() {
     sleep 2  # 给系统一些时间完成文件操作
     
     # 尝试1: 优雅推出
-    if timeout 15 sudo hdiutil detach "$mount_point" -quiet 2>/dev/null; then
+    if sudo hdiutil detach "$mount_point" -quiet 2>/dev/null; then
         echo "  ✅ DMG推出完成"
         return 0
     fi
@@ -663,7 +663,7 @@ safe_detach_dmg() {
     echo "  ⏰ 优雅推出超时，尝试强制推出..."
     
     # 尝试2: 强制推出
-    if timeout 10 sudo hdiutil detach "$mount_point" -force -quiet 2>/dev/null; then
+    if sudo hdiutil detach "$mount_point" -force -quiet 2>/dev/null; then
         echo "  ✅ DMG强制推出完成"
         return 0
     fi
@@ -691,14 +691,16 @@ install_dmg_file() {
     sudo xattr -r -d com.apple.quarantine "$installer_path" 2>/dev/null || true
     echo "  [类型: DMG] - 正在尝试挂载（使用空密码）..."
     
-    # 统一使用空密码尝试挂载所有DMG文件（添加超时保护）
-    HDIUTIL_OUTPUT=$(timeout 30 bash -c "printf '\n' | sudo hdiutil attach '$installer_path' -stdinpass -nobrowse -owners on 2>&1")
+    # 使用空密码尝试挂载DMG文件（允许失败，不中断脚本）
+    set +e  # 临时关闭错误退出
+    HDIUTIL_OUTPUT=$(printf '\n' | sudo hdiutil attach "$installer_path" -stdinpass -nobrowse -owners on 2>&1)
     HDIUTIL_EXIT_CODE=$?
+    set -e  # 重新开启错误退出
     
     # 检查挂载结果
     if [ $HDIUTIL_EXIT_CODE -ne 0 ]; then
-        # 检测超时或认证错误，表示需要密码
-        if [ $HDIUTIL_EXIT_CODE -eq 124 ] || echo "$HDIUTIL_OUTPUT" | grep -q "认证错误\|Authentication error\|authentication failed"; then
+        # 检测认证错误，表示需要密码
+        if echo "$HDIUTIL_OUTPUT" | grep -q "认证错误\|Authentication error\|authentication failed"; then
             echo "  🔐 检测到加密DMG文件（需要密码），自动跳过"
             echo "  💡 提示：此文件将在安装完成后询问您是否重试"
             encrypted_dmg_files+=("$installer_path")
@@ -773,24 +775,19 @@ install_dmg_file() {
                 local target_app_path="/Applications/$app_name"
                 echo "  ✅ 处理应用: $app_name"
                 
-                if [ -d "$target_app_path" ]; then
-                    echo "  🟡 应用 '$app_name' 已存在，跳过安装。"
-                    bypassed_installs+=("$filename (应用已存在: $app_name)")
+                echo "  正在将 '$app_name' 拷贝到 /Applications ..."
+                if sudo cp -R "$app_path" "/Applications/"; then
+                    echo "  ✅ 拷贝完成: $app_name"
+                    
+                    # 移除应用的隔离属性
+                    echo "  正在移除应用的隔离属性..."
+                    sudo xattr -r -d com.apple.quarantine "$target_app_path" 2>/dev/null || true
+                    echo "  ✅ 隔离属性移除完成: $app_name"
+                    
+                    successful_installs+=("$app_name (从DMG)")
                 else
-                    echo "  正在将 '$app_name' 拷贝到 /Applications ..."
-                    if sudo cp -R "$app_path" "/Applications/"; then
-                        echo "  ✅ 拷贝完成: $app_name"
-                        
-                        # 移除应用的隔离属性
-                        echo "  正在移除应用的隔离属性..."
-                        sudo xattr -r -d com.apple.quarantine "$target_app_path" 2>/dev/null || true
-                        echo "  ✅ 隔离属性移除完成: $app_name"
-                        
-                        successful_installs+=("$app_name (从DMG)")
-                    else
-                        echo "  ❌ 拷贝失败: $app_name"
-                        failed_installs+=("$filename (应用拷贝失败: $app_name)")
-                    fi
+                    echo "  ❌ 拷贝失败: $app_name"
+                    failed_installs+=("$filename (应用拷贝失败: $app_name)")
                 fi
             done
         else
@@ -874,24 +871,19 @@ install_app_file() {
     APP_NAME=$(basename "$installer_path")
     TARGET_APP_PATH="/Applications/$APP_NAME"
     
-    if [ -d "$TARGET_APP_PATH" ]; then
-        echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
-        bypassed_installs+=("$filename (应用已存在: $APP_NAME)")
+    echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
+    if sudo cp -R "$installer_path" "/Applications/"; then
+        echo "  ✅ 拷贝完成。"
+        
+        # 移除应用的隔离属性
+        echo "  正在移除应用的隔离属性..."
+        sudo xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
+        echo "  ✅ 隔离属性移除完成。"
+        
+        successful_installs+=("$APP_NAME (直接安装)")
     else
-        echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
-        if sudo cp -R "$installer_path" "/Applications/"; then
-            echo "  ✅ 拷贝完成。"
-            
-            # 移除应用的隔离属性
-            echo "  正在移除应用的隔离属性..."
-            sudo xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
-            echo "  ✅ 隔离属性移除完成。"
-            
-            successful_installs+=("$APP_NAME (直接安装)")
-        else
-            echo "  ❌ 拷贝失败"
-            failed_installs+=("$filename (应用拷贝失败: $APP_NAME)")
-        fi
+        echo "  ❌ 拷贝失败"
+        failed_installs+=("$filename (应用拷贝失败: $APP_NAME)")
     fi
 }
 
@@ -913,36 +905,78 @@ install_zip_file() {
     # 在解压后的内容中移除隔离属性
     sudo xattr -r -d com.apple.quarantine "$temp_extract" 2>/dev/null || true
     
-    # 查找 .app 文件
-    APP_PATH=$(find "$temp_extract" -name "*.app" -maxdepth 5 -print -quit)
+    # 首先查找 .app 文件
+    local app_files=()
+    while IFS= read -r -d '' file; do
+        app_files+=("$file")
+    done < <(find "$temp_extract" -name "*.app" -maxdepth 5 -type d ! -name "._*" ! -name ".DS_Store" -print0)
     
-    if [ -n "$APP_PATH" ]; then
-        APP_NAME=$(basename "$APP_PATH")
-        TARGET_APP_PATH="/Applications/$APP_NAME"
-        echo "  🔍 找到应用: $APP_NAME"
-        
-        if [ -d "$TARGET_APP_PATH" ]; then
-            echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
-            bypassed_installs+=("$filename (应用已存在: $APP_NAME)")
-        else
-            echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
-            if sudo cp -R "$APP_PATH" "/Applications/"; then
+    if [ ${#app_files[@]} -gt 0 ]; then
+        # 找到.app文件，直接安装
+        for app_path in "${app_files[@]}"; do
+            local app_name=$(basename "$app_path")
+            local target_app_path="/Applications/$app_name"
+            echo "  🔍 找到应用: $app_name"
+            
+            echo "  正在将 '$app_name' 拷贝到 /Applications ..."
+            if sudo cp -R "$app_path" "/Applications/"; then
                 echo "  ✅ 拷贝完成。"
                 
                 # 移除应用的隔离属性
                 echo "  正在移除应用的隔离属性..."
-                sudo xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
+                sudo xattr -r -d com.apple.quarantine "$target_app_path" 2>/dev/null || true
                 echo "  ✅ 隔离属性移除完成。"
                 
-                successful_installs+=("$APP_NAME (从ZIP)")
+                successful_installs+=("$app_name (从ZIP)")
             else
                 echo "  ❌ 拷贝失败"
-                failed_installs+=("$filename (应用拷贝失败: $APP_NAME)")
+                failed_installs+=("$filename (应用拷贝失败: $app_name)")
+            fi
+        done
+    else
+        # 没找到.app文件，查找DMG文件
+        echo "  🔍 在ZIP中未找到.app文件，查找DMG文件..."
+        local dmg_files=()
+        while IFS= read -r -d '' file; do
+            dmg_files+=("$file")
+        done < <(find "$temp_extract" -name "*.dmg" -maxdepth 5 -type f ! -name "._*" ! -name ".DS_Store" -print0)
+        
+        if [ ${#dmg_files[@]} -gt 0 ]; then
+            echo "  📦 找到 ${#dmg_files[@]} 个DMG文件，开始处理..."
+            for dmg_path in "${dmg_files[@]}"; do
+                local dmg_name=$(basename "$dmg_path")
+                echo "  🔍 处理DMG文件: $dmg_name"
+                
+                # 调用DMG安装函数处理
+                install_dmg_file "$dmg_path"
+            done
+        else
+            # 查找PKG文件
+            echo "  🔍 在ZIP中未找到DMG文件，查找PKG文件..."
+            local pkg_files=()
+            while IFS= read -r -d '' file; do
+                pkg_files+=("$file")
+            done < <(find "$temp_extract" -name "*.pkg" -maxdepth 5 -type f ! -name "._*" ! -name ".DS_Store" -print0)
+            
+            if [ ${#pkg_files[@]} -gt 0 ]; then
+                echo "  📦 找到 ${#pkg_files[@]} 个PKG文件，开始安装..."
+                for pkg_path in "${pkg_files[@]}"; do
+                    local pkg_name=$(basename "$pkg_path")
+                    echo "  📦 正在安装PKG: $pkg_name"
+                    
+                    if sudo installer -pkg "$pkg_path" -target /; then
+                        echo "  ✅ PKG安装成功: $pkg_name"
+                        successful_installs+=("$pkg_name (从ZIP中的PKG)")
+                    else
+                        echo "  ❌ PKG安装失败: $pkg_name"
+                        failed_installs+=("$filename (ZIP中的PKG安装失败: $pkg_name)")
+                    fi
+                done
+            else
+                echo "  ❌ 在ZIP中未找到.app、.dmg或.pkg文件。"
+                failed_installs+=("$filename (ZIP中未找到可安装的文件)")
             fi
         fi
-    else
-        echo "  ❌ 在ZIP中未找到 .app 文件。"
-        failed_installs+=("$filename (ZIP中未找到.app文件)")
     fi
     
     # 清理临时目录
@@ -1043,10 +1077,8 @@ for installer_path in "$INSTALLERS_DIR"/*; do
         TARGET_APP_PATH="$APPLICATIONS_DIR/$APP_NAME"
         echo "  ✅ 找到应用: $APP_NAME"
         
-        if [ -d "$TARGET_APP_PATH" ]; then
-          echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
-        else
-          echo "  正在将 '$APP_NAME' 拷贝到 $APPLICATIONS_DIR ..."
+        
+        echo "  正在将 '$APP_NAME' 拷贝到 $APPLICATIONS_DIR ..."
           sudo cp -R "$APP_PATH" "$APPLICATIONS_DIR/"
           echo "  ✅ 拷贝完成。"
           
@@ -1093,9 +1125,7 @@ for installer_path in "$INSTALLERS_DIR"/*; do
                   TARGET_APP_PATH="$APPLICATIONS_DIR/$APP_NAME"
                   echo "  🔍 在嵌套DMG中找到应用: $APP_NAME"
                   
-                  if [ -d "$TARGET_APP_PATH" ]; then
-                    echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
-                  else
+                  
                     echo "  正在将 '$APP_NAME' 拷贝到 $APPLICATIONS_DIR ..."
                     sudo cp -R "$NESTED_APP_PATH" "$APPLICATIONS_DIR/"
                     echo "  ✅ 拷贝完成。"
@@ -1127,9 +1157,7 @@ for installer_path in "$INSTALLERS_DIR"/*; do
               TARGET_APP_PATH="$APPLICATIONS_DIR/$APP_NAME"
               echo "  🔍 在Manual install目录中找到应用: $APP_NAME"
               
-              if [ -d "$TARGET_APP_PATH" ]; then
-                echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
-              else
+              
                 echo "  正在将 '$APP_NAME' 拷贝到 $APPLICATIONS_DIR ..."
                 sudo cp -R "$MANUAL_APP_PATH" "$APPLICATIONS_DIR/"
                 echo "  ✅ 拷贝完成。"
@@ -1166,9 +1194,7 @@ for installer_path in "$INSTALLERS_DIR"/*; do
                     TARGET_APP_PATH="$APPLICATIONS_DIR/$APP_NAME"
                     echo "  🔍 在嵌套DMG中找到应用: $APP_NAME"
                     
-                    if [ -d "$TARGET_APP_PATH" ]; then
-                      echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
-                    else
+                    
                       echo "  正在将 '$APP_NAME' 拷贝到 $APPLICATIONS_DIR ..."
                       sudo cp -R "$NESTED_APP_PATH" "$APPLICATIONS_DIR/"
                       echo "  ✅ 拷贝完成。"
@@ -1231,10 +1257,8 @@ for installer_path in "$INSTALLERS_DIR"/*; do
         TARGET_APP_PATH="$APPLICATIONS_DIR/$APP_NAME"
         echo "  🔍 找到应用: $APP_NAME"
         
-        if [ -d "$TARGET_APP_PATH" ]; then
-          echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
-        else
-          echo "  正在将 '$APP_NAME' 拷贝到 $APPLICATIONS_DIR ..."
+        
+        echo "  正在将 '$APP_NAME' 拷贝到 $APPLICATIONS_DIR ..."
           sudo cp -R "$APP_PATH" "$APPLICATIONS_DIR/"
           echo "  ✅ 拷贝完成。"
           
@@ -1262,9 +1286,7 @@ for installer_path in "$INSTALLERS_DIR"/*; do
             TARGET_APP_PATH="$APPLICATIONS_DIR/$APP_NAME"
             echo "  🔍 在嵌套ZIP中找到应用: $APP_NAME"
             
-            if [ -d "$TARGET_APP_PATH" ]; then
-              echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
-            else
+            
               echo "  正在将 '$APP_NAME' 拷贝到 $APPLICATIONS_DIR ..."
               sudo cp -R "$NESTED_APP_PATH" "$APPLICATIONS_DIR/"
               echo "  ✅ 拷贝完成。"
@@ -1297,9 +1319,7 @@ for installer_path in "$INSTALLERS_DIR"/*; do
                 TARGET_APP_PATH="$APPLICATIONS_DIR/$APP_NAME"
                 echo "  🔍 在嵌套DMG中找到应用: $APP_NAME"
                 
-                if [ -d "$TARGET_APP_PATH" ]; then
-                  echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
-                else
+                
                   echo "  正在将 '$APP_NAME' 拷贝到 $APPLICATIONS_DIR ..."
                   sudo cp -R "$NESTED_APP_PATH" "$APPLICATIONS_DIR/"
                   echo "  ✅ 拷贝完成。"
@@ -1341,9 +1361,7 @@ for installer_path in "$INSTALLERS_DIR"/*; do
       APP_NAME=$(basename "$installer_path")
       TARGET_APP_PATH="$APPLICATIONS_DIR/$APP_NAME"
       
-      if [ -d "$TARGET_APP_PATH" ]; then
-        echo "  🟡 应用 '$APP_NAME' 已存在，跳过安装。"
-      else
+      
         echo "  正在将 '$APP_NAME' 拷贝到 $APPLICATIONS_DIR ..."
         sudo cp -R "$installer_path" "$APPLICATIONS_DIR/"
         echo "  ✅ 拷贝完成。"
@@ -1541,18 +1559,14 @@ handle_encrypted_dmg_retry() {
                                     for app_path in "${app_files[@]}"; do
                                         local app_name=$(basename "$app_path")
                                         local target_app_path="/Applications/$app_name"
-                                        if [ -d "$target_app_path" ]; then
-                                            echo "  🟡 应用 '$app_name' 已存在，跳过安装。"
+                                        echo "  正在将 '$app_name' 拷贝到 /Applications ..."
+                                        if sudo cp -R "$app_path" "/Applications/"; then
+                                            echo "  ✅ 拷贝完成: $app_name"
+                                            sudo xattr -r -d com.apple.quarantine "$target_app_path" 2>/dev/null || true
+                                            successful_installs+=("$app_name (从加密DMG重试)")
                                         else
-                                            echo "  正在将 '$app_name' 拷贝到 /Applications ..."
-                                            if sudo cp -R "$app_path" "/Applications/"; then
-                                                echo "  ✅ 拷贝完成: $app_name"
-                                                sudo xattr -r -d com.apple.quarantine "$target_app_path" 2>/dev/null || true
-                                                successful_installs+=("$app_name (从加密DMG重试)")
-                                            else
-                                                echo "  ❌ 拷贝失败: $app_name"
-                                                failed_installs+=("$filename (加密DMG重试，应用拷贝失败)")
-                                            fi
+                                            echo "  ❌ 拷贝失败: $app_name"
+                                            failed_installs+=("$filename (加密DMG重试，应用拷贝失败)")
                                         fi
                                     done
                                 else
