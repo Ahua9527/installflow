@@ -47,6 +47,7 @@ LOCAL_INSTALLERS_DIR=""  # 用户提供的本地安装包目录
 declare -a successful_installs=()    # 成功安装的应用
 declare -a bypassed_installs=()      # 跳过的安装（已存在、加密绕过等）
 declare -a failed_installs=()        # 失败的安装
+declare -a updated_installs=()       # 版本更新的应用
 
 
 # 解析命令行参数
@@ -280,6 +281,7 @@ check_rosetta_status() {
     
     # 询问用户是否要安装Rosetta
     while true; do
+        local rosetta_choice
         read -p "是否要安装Rosetta？[默认: y] (y/n): " -r rosetta_choice
         case $rosetta_choice in
             [Nn]*)
@@ -661,31 +663,10 @@ check_app_installation() {
             
             case $comparison in
                 "1")
-                    echo "  新版本更高，建议更新"
-                    if tty -s; then
-                        # 交互式环境，询问用户
-                        while true; do
-                            read -p "  是否要用新版本覆盖现有应用？[y/n]: " -r choice
-                            case $choice in
-                                [Yy]*)
-                                    echo "  用户选择更新应用"
-                                    return 0  # 继续安装
-                                    ;;
-                                [Nn]*)
-                                    echo "  用户选择保留现有版本"
-                                    bypassed_installs+=("$filename (用户选择保留现有版本: $existing_version)")
-                                    return 1  # 跳过安装
-                                    ;;
-                                *)
-                                    echo "  请输入 y (是) 或 n (否)"
-                                    ;;
-                            esac
-                        done
-                    else
-                        # 非交互式环境，默认跳过
-                        bypassed_installs+=("$filename (新版本可用但非交互式环境)")
-                        return 1
-                    fi
+                    echo "  检测到新版本，自动更新: $existing_version → $new_version"
+                    # 记录版本更新信息
+                    updated_installs+=("$app_name: $existing_version → $new_version")
+                    return 0  # 继续安装
                     ;;
                 "0")
                     echo "  版本相同，跳过安装"
@@ -839,19 +820,19 @@ install_dmg_file() {
                 fi
             fi
         else
-            echo "  未找到 .app 文件，检查TNT特殊结构..."
+            echo "  未找到 .app 文件，检查嵌套安装结构..."
             
             # 查找Manual install目录
-            MANUAL_INSTALL_DIR=$(find "$MOUNT_POINT" -name "*[Mm]anual*install*" -type d 2>/dev/null | head -1)
+            local MANUAL_INSTALL_DIR=$(find "$MOUNT_POINT" -name "*[Mm]anual*install*" -type d 2>/dev/null | head -1)
             
             if [ -n "$MANUAL_INSTALL_DIR" ]; then
-                echo "  🎯 发现TNT结构，找到Manual install目录: $(basename "$MANUAL_INSTALL_DIR")"
+                echo "  📁 发现嵌套安装结构，找到安装目录: $(basename "$MANUAL_INSTALL_DIR")"
                 
                 # 在Manual install目录中查找DMG文件
-                MANUAL_INSTALL_DMG=$(find "$MANUAL_INSTALL_DIR" -name "*.dmg" 2>/dev/null | head -1)
+                local MANUAL_INSTALL_DMG=$(find "$MANUAL_INSTALL_DIR" -name "*.dmg" 2>/dev/null | head -1)
                 
                 if [ -n "$MANUAL_INSTALL_DMG" ]; then
-                    echo "  📦 在Manual install目录中找到DMG: $(basename "$MANUAL_INSTALL_DMG")"
+                    echo "  📦 在安装目录中找到DMG: $(basename "$MANUAL_INSTALL_DMG")"
                     echo "  📦 正在挂载嵌套DMG..."
                     
                     # 获取嵌套DMG挂载前的挂载点列表
@@ -888,7 +869,7 @@ install_dmg_file() {
                     local nested_mount_after=$(mount | grep "/Volumes" | sed -E 's/^.* on (\/Volumes\/[^(]+) \(.*/\1/' | sed 's/[[:space:]]*$//')
                     
                     # 找出新增的挂载点
-                    NESTED_MOUNT_POINT=""
+                    local NESTED_MOUNT_POINT=""
                     while IFS= read -r mount_path; do
                         local found=0
                         while IFS= read -r existing_mount; do
@@ -908,159 +889,15 @@ install_dmg_file() {
                         echo "  已挂载到: $NESTED_MOUNT_POINT"
                         
                         # 在嵌套DMG中查找.app文件
-                        NESTED_APP_PATH=$(find "$NESTED_MOUNT_POINT" -name "*.app" -maxdepth 3 -print -quit 2>/dev/null)
+                        local NESTED_APP_PATH=$(find "$NESTED_MOUNT_POINT" -name "*.app" -maxdepth 3 -print -quit 2>/dev/null)
                         
                         if [ -n "$NESTED_APP_PATH" ]; then
-                            APP_NAME=$(basename "$NESTED_APP_PATH")
+                            local APP_NAME=$(basename "$NESTED_APP_PATH")
                             echo "  🔍 在嵌套DMG中找到应用: $APP_NAME"
                             
                             # 使用智能APP覆盖检测
                             if check_app_installation "$NESTED_APP_PATH" "$filename"; then
-                                TARGET_APP_PATH="/Applications/$APP_NAME"
-                                echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
-                                if sudo cp -R "$NESTED_APP_PATH" "/Applications/"; then
-                                    echo "  拷贝完成。"
-                                    
-                                    # 移除应用的隔离属性
-                                    echo "  正在移除应用的隔离属性..."
-                                    sudo xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
-                                    echo "  隔离属性移除完成。"
-                                    
-                                    successful_installs+=("$APP_NAME (TNT嵌套DMG)")
-                                else
-                                    echo "  ERROR: 拷贝失败"
-                                    failed_installs+=("$filename (TNT嵌套DMG应用拷贝失败: $APP_NAME)")
-                                fi
-                            fi
-                        else
-                            echo "  ❌ 在嵌套DMG中也未找到 .app 文件。"
-                            failed_installs+=("$filename (TNT嵌套DMG中未找到.app文件)")
-                        fi
-                        
-                        # 推出嵌套DMG
-                        echo "  正在推出嵌套DMG: $(basename "$MANUAL_INSTALL_DMG")..."
-                        sleep 1
-                        if sudo hdiutil detach "$NESTED_MOUNT_POINT" -quiet 2>/dev/null; then
-                            echo "  ✅ 嵌套DMG推出完成。"
-                        else
-                            sudo hdiutil detach "$NESTED_MOUNT_POINT" -force -quiet 2>/dev/null || true
-                            echo "  ✅ 嵌套DMG强制推出完成。"
-                        fi
-                    else
-                        echo "  ❌ 嵌套DMG挂载失败"
-                        failed_installs+=("$filename (TNT嵌套DMG挂载失败)")
-                    fi
-                else
-                    echo "  🔍 Manual install目录中未找到DMG文件，直接查找.app文件..."
-                    # 直接在Manual install目录中查找.app文件
-                    MANUAL_APP_PATH=$(find "$MANUAL_INSTALL_DIR" -name "*.app" -maxdepth 3 -print -quit)
-                    
-                    if [ -n "$MANUAL_APP_PATH" ]; then
-                        APP_NAME=$(basename "$MANUAL_APP_PATH")
-                        echo "  🔍 在Manual install目录中找到应用: $APP_NAME"
-                        
-                        # 使用智能APP覆盖检测
-                        if check_app_installation "$MANUAL_APP_PATH" "$filename"; then
-                            TARGET_APP_PATH="/Applications/$APP_NAME"
-                            echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
-                            if sudo cp -R "$MANUAL_APP_PATH" "/Applications/"; then
-                                echo "  拷贝完成。"
-                                
-                                # 移除应用的隔离属性
-                                echo "  正在移除应用的隔离属性..."
-                                sudo xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
-                                echo "  隔离属性移除完成。"
-                                
-                                successful_installs+=("$APP_NAME (TNT Manual install)")
-                            else
-                                echo "  ERROR: 拷贝失败"
-                                failed_installs+=("$filename (TNT Manual install应用拷贝失败: $APP_NAME)")
-                            fi
-                        fi
-                    else
-                        echo "  ❌ 在Manual install目录中也未找到 .app 文件。"
-                        failed_installs+=("$filename (TNT Manual install目录中未找到.app文件)")
-                    fi
-                fi
-            else
-                # 查找直接的嵌套DMG文件（作为备用方案）
-                echo "  🔍 查找其他嵌套DMG文件..."
-                # 首先查找特定模式的DMG
-                MANUAL_INSTALL_DMG=$(find "$MOUNT_POINT" -name "*[Mm]anual*install*.dmg" -o -name "*[Mm]anual*.dmg" -o -name "*install*.dmg" 2>/dev/null | head -1)
-                
-                # 如果没找到特定模式，查找任何DMG文件（排除当前主DMG）
-                if [ -z "$MANUAL_INSTALL_DMG" ]; then
-                    echo "  🔍 查找任何嵌套DMG文件..."
-                    MANUAL_INSTALL_DMG=$(find "$MOUNT_POINT" -name "*.dmg" -type f 2>/dev/null | head -1)
-                fi
-                
-                if [ -n "$MANUAL_INSTALL_DMG" ]; then
-                    echo "  🎯 发现嵌套DMG文件: $(basename "$MANUAL_INSTALL_DMG")"
-                    echo "  📦 正在挂载嵌套DMG..."
-                    
-                    # 获取嵌套DMG挂载前的挂载点列表
-                    local nested_mount_before=$(mount | grep "/Volumes" | sed -E 's/^.* on (\/Volumes\/[^(]+) \(.*/\1/' | sed 's/[[:space:]]*$//')
-                    
-                    # 挂载嵌套的DMG（使用现代化方法）
-                    (yes | hdiutil attach "$MANUAL_INSTALL_DMG" -nobrowse -noverify > /dev/null 2>&1) &
-                    local nested_hdiutil_pid=$!
-                    
-                    # 等待最多15秒
-                    local nested_timeout=15
-                    local nested_count=0
-                    while [ $nested_count -lt $nested_timeout ]; do
-                        if ! kill -0 $nested_hdiutil_pid 2>/dev/null; then
-                            break
-                        fi
-                        sleep 1
-                        ((nested_count++))
-                        if [ $nested_count -eq 5 ]; then
-                            echo "  等待嵌套DMG挂载..."
-                        fi
-                    done
-                    
-                    # 终止进程如果还在运行
-                    if kill -0 $nested_hdiutil_pid 2>/dev/null; then
-                        kill $nested_hdiutil_pid 2>/dev/null
-                        sleep 1
-                        kill -9 $nested_hdiutil_pid 2>/dev/null
-                    fi
-                    
-                    sleep 1
-                    
-                    # 获取嵌套DMG挂载后的挂载点列表
-                    local nested_mount_after=$(mount | grep "/Volumes" | sed -E 's/^.* on (\/Volumes\/[^(]+) \(.*/\1/' | sed 's/[[:space:]]*$//')
-                    
-                    # 找出新增的挂载点
-                    NESTED_MOUNT_POINT=""
-                    while IFS= read -r mount_path; do
-                        local found=0
-                        while IFS= read -r existing_mount; do
-                            if [ "$existing_mount" = "$mount_path" ]; then
-                                found=1
-                                break
-                            fi
-                        done <<< "$nested_mount_before"
-                        if [ $found -eq 0 ]; then
-                            NESTED_MOUNT_POINT="$mount_path"
-                            break
-                        fi
-                    done <<< "$nested_mount_after"
-                    
-                    if [ -n "$NESTED_MOUNT_POINT" ] && [ -d "$NESTED_MOUNT_POINT" ]; then
-                        echo "  ✅ 嵌套DMG挂载成功"
-                        echo "  已挂载到: $NESTED_MOUNT_POINT"
-                        
-                        # 在嵌套DMG中查找.app文件
-                        NESTED_APP_PATH=$(find "$NESTED_MOUNT_POINT" -name "*.app" -maxdepth 3 -print -quit 2>/dev/null)
-                        
-                        if [ -n "$NESTED_APP_PATH" ]; then
-                            APP_NAME=$(basename "$NESTED_APP_PATH")
-                            echo "  🔍 在嵌套DMG中找到应用: $APP_NAME"
-                            
-                            # 使用智能APP覆盖检测
-                            if check_app_installation "$NESTED_APP_PATH" "$filename"; then
-                                TARGET_APP_PATH="/Applications/$APP_NAME"
+                                local TARGET_APP_PATH="/Applications/$APP_NAME"
                                 echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
                                 if sudo cp -R "$NESTED_APP_PATH" "/Applications/"; then
                                     echo "  拷贝完成。"
@@ -1095,7 +932,151 @@ install_dmg_file() {
                         failed_installs+=("$filename (嵌套DMG挂载失败)")
                     fi
                 else
-                    echo "  ❌ 在DMG中未找到 .app 文件、Manual install目录或嵌套DMG文件。"
+                    echo "  🔍 安装目录中未找到DMG文件，直接查找.app文件..."
+                    # 直接在安装目录中查找.app文件
+                    local MANUAL_APP_PATH=$(find "$MANUAL_INSTALL_DIR" -name "*.app" -maxdepth 3 -print -quit)
+                    
+                    if [ -n "$MANUAL_APP_PATH" ]; then
+                        APP_NAME=$(basename "$MANUAL_APP_PATH")
+                        echo "  🔍 在安装目录中找到应用: $APP_NAME"
+                        
+                        # 使用智能APP覆盖检测
+                        if check_app_installation "$MANUAL_APP_PATH" "$filename"; then
+                            TARGET_APP_PATH="/Applications/$APP_NAME"
+                            echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
+                            if sudo cp -R "$MANUAL_APP_PATH" "/Applications/"; then
+                                echo "  拷贝完成。"
+                                
+                                # 移除应用的隔离属性
+                                echo "  正在移除应用的隔离属性..."
+                                sudo xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
+                                echo "  隔离属性移除完成。"
+                                
+                                successful_installs+=("$APP_NAME (嵌套安装)")
+                            else
+                                echo "  ERROR: 拷贝失败"
+                                failed_installs+=("$filename (嵌套安装应用拷贝失败: $APP_NAME)")
+                            fi
+                        fi
+                    else
+                        echo "  ❌ 在安装目录中也未找到 .app 文件。"
+                        failed_installs+=("$filename (安装目录中未找到.app文件)")
+                    fi
+                fi
+            else
+                # 查找直接的嵌套DMG文件（作为备用方案）
+                echo "  🔍 查找其他嵌套DMG文件..."
+                # 首先查找特定模式的DMG
+                local MANUAL_INSTALL_DMG=$(find "$MOUNT_POINT" -name "*[Mm]anual*install*.dmg" -o -name "*[Mm]anual*.dmg" -o -name "*install*.dmg" 2>/dev/null | head -1)
+                
+                # 如果没找到特定模式，查找任何DMG文件（排除当前主DMG）
+                if [ -z "$MANUAL_INSTALL_DMG" ]; then
+                    echo "  🔍 查找任何嵌套DMG文件..."
+                    MANUAL_INSTALL_DMG=$(find "$MOUNT_POINT" -name "*.dmg" -type f 2>/dev/null | head -1)
+                fi
+                
+                if [ -n "$MANUAL_INSTALL_DMG" ]; then
+                    echo "  📦 发现嵌套DMG文件: $(basename "$MANUAL_INSTALL_DMG")"
+                    echo "  📦 正在挂载嵌套DMG..."
+                    
+                    # 获取嵌套DMG挂载前的挂载点列表
+                    local nested_mount_before=$(mount | grep "/Volumes" | sed -E 's/^.* on (\/Volumes\/[^(]+) \(.*/\1/' | sed 's/[[:space:]]*$//')
+                    
+                    # 挂载嵌套的DMG（使用现代化方法）
+                    (yes | hdiutil attach "$MANUAL_INSTALL_DMG" -nobrowse -noverify > /dev/null 2>&1) &
+                    local nested_hdiutil_pid=$!
+                    
+                    # 等待最多15秒
+                    local nested_timeout=15
+                    local nested_count=0
+                    while [ $nested_count -lt $nested_timeout ]; do
+                        if ! kill -0 $nested_hdiutil_pid 2>/dev/null; then
+                            break
+                        fi
+                        sleep 1
+                        ((nested_count++))
+                        if [ $nested_count -eq 5 ]; then
+                            echo "  等待嵌套DMG挂载..."
+                        fi
+                    done
+                    
+                    # 终止进程如果还在运行
+                    if kill -0 $nested_hdiutil_pid 2>/dev/null; then
+                        kill $nested_hdiutil_pid 2>/dev/null
+                        sleep 1
+                        kill -9 $nested_hdiutil_pid 2>/dev/null
+                    fi
+                    
+                    sleep 1
+                    
+                    # 获取嵌套DMG挂载后的挂载点列表
+                    local nested_mount_after=$(mount | grep "/Volumes" | sed -E 's/^.* on (\/Volumes\/[^(]+) \(.*/\1/' | sed 's/[[:space:]]*$//')
+                    
+                    # 找出新增的挂载点
+                    local NESTED_MOUNT_POINT=""
+                    while IFS= read -r mount_path; do
+                        local found=0
+                        while IFS= read -r existing_mount; do
+                            if [ "$existing_mount" = "$mount_path" ]; then
+                                found=1
+                                break
+                            fi
+                        done <<< "$nested_mount_before"
+                        if [ $found -eq 0 ]; then
+                            NESTED_MOUNT_POINT="$mount_path"
+                            break
+                        fi
+                    done <<< "$nested_mount_after"
+                    
+                    if [ -n "$NESTED_MOUNT_POINT" ] && [ -d "$NESTED_MOUNT_POINT" ]; then
+                        echo "  ✅ 嵌套DMG挂载成功"
+                        echo "  已挂载到: $NESTED_MOUNT_POINT"
+                        
+                        # 在嵌套DMG中查找.app文件
+                        local NESTED_APP_PATH=$(find "$NESTED_MOUNT_POINT" -name "*.app" -maxdepth 3 -print -quit 2>/dev/null)
+                        
+                        if [ -n "$NESTED_APP_PATH" ]; then
+                            local APP_NAME=$(basename "$NESTED_APP_PATH")
+                            echo "  🔍 在嵌套DMG中找到应用: $APP_NAME"
+                            
+                            # 使用智能APP覆盖检测
+                            if check_app_installation "$NESTED_APP_PATH" "$filename"; then
+                                local TARGET_APP_PATH="/Applications/$APP_NAME"
+                                echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
+                                if sudo cp -R "$NESTED_APP_PATH" "/Applications/"; then
+                                    echo "  拷贝完成。"
+                                    
+                                    # 移除应用的隔离属性
+                                    echo "  正在移除应用的隔离属性..."
+                                    sudo xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
+                                    echo "  隔离属性移除完成。"
+                                    
+                                    successful_installs+=("$APP_NAME (嵌套DMG)")
+                                else
+                                    echo "  ERROR: 拷贝失败"
+                                    failed_installs+=("$filename (嵌套DMG应用拷贝失败: $APP_NAME)")
+                                fi
+                            fi
+                        else
+                            echo "  ❌ 在嵌套DMG中也未找到 .app 文件。"
+                            failed_installs+=("$filename (嵌套DMG中未找到.app文件)")
+                        fi
+                        
+                        # 推出嵌套DMG
+                        echo "  正在推出嵌套DMG: $(basename "$MANUAL_INSTALL_DMG")..."
+                        sleep 1
+                        if sudo hdiutil detach "$NESTED_MOUNT_POINT" -quiet 2>/dev/null; then
+                            echo "  ✅ 嵌套DMG推出完成。"
+                        else
+                            sudo hdiutil detach "$NESTED_MOUNT_POINT" -force -quiet 2>/dev/null || true
+                            echo "  ✅ 嵌套DMG强制推出完成。"
+                        fi
+                    else
+                        echo "  ❌ 嵌套DMG挂载失败"
+                        failed_installs+=("$filename (嵌套DMG挂载失败)")
+                    fi
+                else
+                    echo "  ❌ 在DMG中未找到 .app 文件、安装目录或嵌套DMG文件。"
                     echo "  📁 DMG内容列表："
                     ls -la "$MOUNT_POINT" | head -10
                     failed_installs+=("$filename (DMG中未找到可安装的内容)")
@@ -1227,15 +1208,15 @@ install_zip_file() {
     sudo xattr -r -d com.apple.quarantine "$temp_extract" 2>/dev/null || true
     
     # 查找 .app 文件
-    APP_PATH=$(find "$temp_extract" -name "*.app" -maxdepth 5 ! -name "._*" ! -name ".DS_Store" -print -quit)
+    local APP_PATH=$(find "$temp_extract" -name "*.app" -maxdepth 5 ! -name "._*" ! -name ".DS_Store" -print -quit)
     
     if [ -n "$APP_PATH" ]; then
-        APP_NAME=$(basename "$APP_PATH")
+        local APP_NAME=$(basename "$APP_PATH")
         echo "  找到应用: $APP_NAME"
         
         # 使用智能APP覆盖检测（带版本号比较）
         if check_app_installation "$APP_PATH" "$filename"; then
-            TARGET_APP_PATH="/Applications/$APP_NAME"
+            local TARGET_APP_PATH="/Applications/$APP_NAME"
             echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
             if sudo cp -R "$APP_PATH" "/Applications/"; then
                 echo "  拷贝完成。"
@@ -1308,10 +1289,11 @@ run_direct_installation() {
     echo "🔔 叮当装正在为您安装应用..."
     echo "========================================"
     
-    # 定义计数器和数组来跟踪安装结果
-    local successful_installs=()
-    local failed_installs=()
-    local bypassed_installs=()
+    # 清空全局安装结果数组
+    successful_installs=()
+    failed_installs=()
+    bypassed_installs=()
+    updated_installs=()
     
     # 安装所有选中的文件
     for installer_path in "${selected_local_files[@]}"; do
@@ -1384,6 +1366,7 @@ show_installation_summary() {
     echo -e "${BLUE}📊 安装汇总报告${NC}"
     echo "========================================"
     echo "  成功安装: ${#successful_installs[@]}"
+    echo "  版本更新: ${#updated_installs[@]}"
     echo "  跳过安装: ${#bypassed_installs[@]}"
     echo "  失败安装: ${#failed_installs[@]}"
     
@@ -1392,6 +1375,16 @@ show_installation_summary() {
         echo -e "${GREEN}✅ 成功安装 (${#successful_installs[@]})${NC}"
         echo "----------------------------------------"
         for app in "${successful_installs[@]}"; do
+            echo "  • $app"
+        done
+        echo ""
+    fi
+    
+    # 显示版本更新的应用
+    if [ ${#updated_installs[@]} -gt 0 ]; then
+        echo -e "${BLUE}🔄 版本更新 (${#updated_installs[@]})${NC}"
+        echo "----------------------------------------"
+        for app in "${updated_installs[@]}"; do
             echo "  • $app"
         done
         echo ""
@@ -1421,10 +1414,17 @@ show_installation_summary() {
     
     # 根据结果显示不同的完成消息
     if [ ${#failed_installs[@]} -eq 0 ]; then
-        if [ ${#successful_installs[@]} -gt 0 ]; then
-            echo -e "${GREEN}🎉 所有应用安装成功！${NC}"
+        local total_completed=$((${#successful_installs[@]} + ${#updated_installs[@]}))
+        if [ $total_completed -gt 0 ]; then
+            if [ ${#updated_installs[@]} -gt 0 ] && [ ${#successful_installs[@]} -gt 0 ]; then
+                echo -e "${GREEN}🎉 所有应用处理完成！${NC}（${#successful_installs[@]} 个新安装，${#updated_installs[@]} 个版本更新）"
+            elif [ ${#updated_installs[@]} -gt 0 ]; then
+                echo -e "${GREEN}🎉 所有应用更新完成！${NC}（${#updated_installs[@]} 个版本更新）"
+            else
+                echo -e "${GREEN}🎉 所有应用安装成功！${NC}（${#successful_installs[@]} 个新安装）"
+            fi
         else
-            echo -e "${YELLOW}📝 没有新的应用需要安装${NC}"
+            echo -e "${YELLOW}📝 没有新的应用需要安装或更新${NC}"
         fi
     else
         echo -e "${YELLOW}⚠️  部分应用安装失败，请检查上述失败列表${NC}"
@@ -1433,65 +1433,6 @@ show_installation_summary() {
     echo ""
 }
 
-# 解析命令行参数
-parse_arguments() {
-    if [ -n "$1" ]; then
-        LOCAL_INSTALLERS_DIR="$1"
-        if [ ! -d "$LOCAL_INSTALLERS_DIR" ]; then
-            error "指定的目录不存在: $LOCAL_INSTALLERS_DIR"
-            exit 1
-        fi
-        log "使用指定目录: $LOCAL_INSTALLERS_DIR"
-    else
-        # 交互式选择文件夹
-        prompt_for_folder
-    fi
-}
-
-# 交互式选择文件夹
-prompt_for_folder() {
-    echo ""
-    echo "🔔 叮当装 InstallFlow - Mac 批量安装工具"
-    echo ""
-    echo "请输入包含安装包的文件夹路径："
-    echo "(支持 .dmg、.pkg、.zip、.app 格式)"
-    echo ""
-    
-    while true; do
-        read -p "文件夹路径: " -r LOCAL_INSTALLERS_DIR
-        
-        if [ -z "$LOCAL_INSTALLERS_DIR" ]; then
-            echo "请输入有效的文件夹路径"
-            continue
-        fi
-        
-        # 展开波浪号
-        LOCAL_INSTALLERS_DIR="${LOCAL_INSTALLERS_DIR/#\~/$HOME}"
-        
-        if [ ! -d "$LOCAL_INSTALLERS_DIR" ]; then
-            echo "错误：目录不存在，请重新输入"
-            continue
-        fi
-        
-        # 检查目录是否包含安装包
-        local has_packages=false
-        if find "$LOCAL_INSTALLERS_DIR" \( -name "*.dmg" -o -name "*.pkg" -o -name "*.zip" -o -name "*.app" \) ! -name "._*" ! -name ".DS_Store" -print -quit 2>/dev/null | grep -q .; then
-            has_packages=true
-        fi
-        
-        if [ "$has_packages" = false ]; then
-            echo "警告：指定目录中未找到任何安装包文件"
-            read -p "是否继续？[y/n]: " -r confirm
-            if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-                continue
-            fi
-        fi
-        
-        break
-    done
-    
-    log "选择目录: $LOCAL_INSTALLERS_DIR"
-}
 
 # 显示使用帮助
 show_help() {
@@ -1511,7 +1452,7 @@ show_help() {
     echo "  • ⌨️  方向键 ↑↓ 移动光标，空格键切换选择状态"
     echo "  • 🔄 Ctrl+A 全选，Ctrl+N 全不选"
     echo "  • ✅ 支持 .dmg、.pkg、.zip、.app 格式"
-    echo "  • 🔍 智能检测TNT团队软件包（嵌套DMG结构）"
+    echo "  • 🔍 智能检测嵌套DMG结构和特殊安装包"
     echo "  • 📁 递归遍历子目录中的安装包"
     echo "  • 🔐 自动移除应用的隔离属性（quarantine）"
     echo "  • 📦 支持ZIP中的PKG安装包"

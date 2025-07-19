@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. **Scripts/install.sh** - Main installation script that handles .dmg, .pkg, .zip, and .app files
    - Interactive package selector with keyboard navigation
    - Gatekeeper management for smooth third-party app installation
-   - Support for nested/special package structures (e.g., TNT team packages)
+   - Support for nested/special package structures and complex DMG files
    - Automatic quarantine attribute removal
 
 2. **Frontend/** - Web-based folder selector
