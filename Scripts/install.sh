@@ -48,7 +48,20 @@ declare -a successful_installs=()    # 成功安装的应用
 declare -a bypassed_installs=()      # 跳过的安装（已存在、加密绕过等）
 declare -a failed_installs=()        # 失败的安装
 declare -a updated_installs=()       # 版本更新的应用
+declare -a temp_files=()             # 临时文件/目录追踪数组
 
+# 清理函数
+cleanup() {
+    local temp_resource
+    for temp_resource in "${temp_files[@]}"; do
+        if [ -e "$temp_resource" ]; then
+            rm -rf "$temp_resource" 2>/dev/null || true
+        fi
+    done
+}
+
+# 设置退出陷阱以确保清理
+trap cleanup EXIT INT TERM
 
 # 解析命令行参数
 parse_arguments() {
@@ -565,7 +578,13 @@ analyze_local_packages() {
     package_files_list=()
     
     # 遍历本地安装包目录（兼容bash 3.x，包括子目录和.app文件）
-    local temp_file="/tmp/packages_list_$$"
+    local temp_file=$(mktemp -t installflow_list.XXXXXX)
+    if [ ! -f "$temp_file" ]; then
+        error "无法创建临时文件"
+        exit 1
+    fi
+    chmod 600 "$temp_file"  # 只有所有者可读写
+    temp_files+=("$temp_file")  # 添加到临时文件追踪数组
     find "$LOCAL_INSTALLERS_DIR" \( -name "*.dmg" -o -name "*.pkg" -o -name "*.zip" -o -name "*.app" \) ! -name "._*" ! -name ".DS_Store" > "$temp_file"
     
     while IFS= read -r file; do
@@ -1104,8 +1123,13 @@ check_pkg_installation() {
     echo "  FIND: 检查PKG是否已安装..."
     
     # 创建临时目录来提取PKG信息
-    local temp_dir="/tmp/pkg_check_$$"
-    mkdir -p "$temp_dir"
+    local temp_dir=$(mktemp -d -t installflow_pkg.XXXXXX)
+    if [ ! -d "$temp_dir" ]; then
+        echo "  ERROR: 无法创建临时目录"
+        return 0  # 默认允许安装
+    fi
+    chmod 700 "$temp_dir"  # 只有所有者可访问
+    temp_files+=("$temp_dir")  # 添加到临时文件追踪数组
     
     # 尝试提取PKG信息
     if pkgutil --expand-full "$installer_path" "$temp_dir" 2>/dev/null; then
@@ -1199,8 +1223,14 @@ install_zip_file() {
     echo "  [类型: ZIP] - 正在解压..."
     
     # 创建临时解压目录
-    local temp_extract="/tmp/zip_extract_$$"
-    mkdir -p "$temp_extract"
+    local temp_extract=$(mktemp -d -t installflow_zip.XXXXXX)
+    if [ ! -d "$temp_extract" ]; then
+        echo "  ERROR: 无法创建临时目录"
+        failed_installs+=("$filename (无法创建临时目录)")
+        return
+    fi
+    chmod 700 "$temp_extract"  # 只有所有者可访问
+    temp_files+=("$temp_extract")  # 添加到临时文件追踪数组
     
     unzip -q "$installer_path" -d "$temp_extract"
     
