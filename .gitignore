@@ -26,3 +26,4 @@ Frontend/DEPLOYMENT.md
 .github/ACTIONS_SETUP.md
 .gitignore
 Frontend/image.png
+Frontend/.DS_Store

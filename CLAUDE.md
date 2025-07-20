@@ -4,51 +4,112 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-叮当装 (InstallFlow) is a macOS automation tool for batch installing applications from local packages. It consists of a bash script for installation and a web-based frontend for folder selection. The project name combines Chinese "叮当装" (DingDang Zhuang - meaning "install with a ding-dong/bell sound") and English "InstallFlow".
+InstallFlow (叮当装) is a Mac batch application installer tool with a Cloudflare Workers-based web frontend and a comprehensive bash installation script. The project is designed to make software installation as simple as "叮当" (dingdang - like a bell chime).
+
+## Development Commands
+
+### Frontend Development (Cloudflare Workers)
+
+```bash
+cd Frontend
+
+# Install Wrangler CLI globally
+npm install -g wrangler
+
+# Deploy to development environment
+wrangler deploy --env development
+
+# Deploy to production environment  
+wrangler deploy --env production
+
+# Start local development server
+wrangler dev
+```
+
+### Testing the Installation Script
+
+```bash
+# Test the install script locally
+bash Scripts/install.sh
+
+# Test via curl (requires deployment)
+bash <(curl -fsSL https://ding.ahua.space/install)
+```
+
+### Deployment
+
+The project uses GitHub Actions for automatic deployment:
+- **Pull Requests**: Deploy to development environment (`installflow-dev`)
+- **Main branch pushes**: Deploy to production environment (`installflow-prod`)
+- **Manual**: Use `workflow_dispatch` trigger
 
 ## Architecture
 
-### Components
-1. **Scripts/install.sh** - Main installation script that handles .dmg, .pkg, .zip, and .app files
-   - Interactive package selector with keyboard navigation
-   - Gatekeeper management for smooth third-party app installation
-   - Support for nested/special package structures and complex DMG files
-   - Automatic quarantine attribute removal
+### Frontend (`/Frontend/`)
+- **Single-file Cloudflare Worker**: `worker.js` contains the complete web application
+- **Self-contained design**: HTML, CSS, and JavaScript are inlined for optimal edge performance
+- **No build process**: Direct deployment of `worker.js` to Cloudflare Workers
+- **Configuration**: `wrangler.toml` defines deployment environments and settings
 
-2. **Frontend/** - Web-based folder selector
-   - HTML5 drag-and-drop interface
-   - Generates shell commands for the install script
-   - Uses Marked.js for command formatting
+### Installation Script (`/Scripts/install.sh`)
+- **Comprehensive installer**: 1,377 lines handling multiple Mac app formats (DMG, PKG, ZIP, APP)
+- **Security-first approach**: Input validation, path security, temporary file cleanup
+- **Interactive terminal UI**: Arrow key navigation and space selection
+- **Advanced features**: Version comparison, nested DMG handling, Apple Silicon support
 
-## Commands
+## Key Components
 
-### Running the Installation Script
-```bash
-# Run with a folder containing installation packages
-bash Scripts/install.sh /path/to/installers
+### Worker Architecture
+The Cloudflare Worker serves:
+- Static HTML with inlined CSS and modern gradient design
+- JavaScript for interactive features (copy-to-clipboard, animations)
+- URL routing and redirects
+- Installation command distribution
 
-# Show help
-bash Scripts/install.sh --help
+### Installation Script Features
+- **Multi-format support**: Handles DMG (including nested/TNT structures), PKG, ZIP, APP files
+- **Security mechanisms**: Path validation, quarantine removal, Gatekeeper integration
+- **Smart installation logic**: Duplicate detection, version comparison, automatic updates
+- **Error handling**: Comprehensive logging and rollback capabilities
+- **Apple Silicon support**: Automatic Rosetta detection and installation
+
+## Environment Configuration
+
+### Cloudflare Workers Environments
+- **Development**: `installflow-dev` - Used for PR testing
+- **Production**: `installflow-prod` - Main deployment target
+
+### Required Secrets
+- `CLOUDFLARE_API_TOKEN`: Required for GitHub Actions deployment
+
+## File Structure
+
 ```
-
-### Testing the Web Interface
-```bash
-# Open the web interface (macOS)
-open Frontend/index.html
-
-# Or serve it with a local server
-python3 -m http.server -d Frontend 8000
+/Frontend/
+  worker.js          # Complete Cloudflare Worker application
+  wrangler.toml      # Deployment configuration
+  
+/Scripts/
+  install.sh         # Main installation script
+  
+/.github/
+  workflows/deploy.yml    # GitHub Actions deployment workflow
+  ACTIONS_SETUP.md       # Deployment setup instructions
 ```
 
 ## Development Notes
 
-### Key Script Features
-- **Interactive Selection**: Uses terminal-based UI with arrow keys, space for selection, Ctrl+A/N for select all/none
-- **Gatekeeper Handling**: Prompts to temporarily disable Gatekeeper for easier installation, with reminders to re-enable
-- **Package Detection**: Recursively finds packages in subdirectories, handles various packaging formats including nested structures
-- **Error Handling**: Comprehensive error checking with fallback options for different package structures
+### Frontend Changes
+- Edit `worker.js` directly - no build step required
+- Test locally with `wrangler dev`
+- Deploy changes trigger automatic GitHub Actions
 
-### Web Frontend
-- Pure JavaScript with no build process required
-- Uses Web File API and drag-drop events
-- Generates commands that reference the bootstrap.sh script (though the actual script is install.sh)
+### Script Changes
+- Test `install.sh` locally before committing
+- Script is distributed via GitHub raw content with Cloudflare proxy
+- Changes are immediately available after commit to main branch
+
+### Security Considerations
+- The installation script includes extensive security validations
+- Path injection prevention and temporary file cleanup are implemented
+- All external downloads are verified and handled securely
