@@ -51,7 +51,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
                     <div class="feature-item">
                         <div class="feature-icon">📦</div>
                         <h3>多格式支持</h3>
-                        <p>支持 .dmg、.pkg、.zip、.app 等常见格式</p>
+                        <p>支持 .dmg、.iso、.pkg、.zip、.app 等常见格式</p>
                     </div>
                     <div class="feature-item">
                         <div class="feature-icon">⚡</div>

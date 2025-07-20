@@ -25,6 +25,7 @@ InstallFlow is a batch processing tool designed for macOS to help you quickly in
 
 ### 🚀 Multi-Format Support
 - **DMG Files**: Auto-mount, extract apps, intelligently handle nested structures
+- **ISO Files**: Disk image mounting, app extraction, support for multi-level nested structures
 - **PKG Files**: Invoke system installer for installation
 - **ZIP Files**: Extract and retrieve applications within
 - **APP Files**: Directly copy to Applications folder
@@ -68,7 +69,7 @@ InstallFlow is a batch processing tool designed for macOS to help you quickly in
 ### System Requirements
 
 - macOS 10.15 (Catalina) or higher
-- Locally downloaded app installation packages (DMG/PKG/ZIP/APP)
+- Locally downloaded app installation packages (DMG/ISO/PKG/ZIP/APP)
 - Terminal access permissions
 
 ### Usage

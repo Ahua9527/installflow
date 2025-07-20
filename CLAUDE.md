@@ -52,7 +52,7 @@ The project uses GitHub Actions for automatic deployment:
 - **Configuration**: `wrangler.toml` defines deployment environments and settings
 
 ### Installation Script (`/Scripts/install.sh`)
-- **Comprehensive installer**: 1,377 lines handling multiple Mac app formats (DMG, PKG, ZIP, APP)
+- **Comprehensive installer**: 1,377 lines handling multiple Mac app formats (DMG, ISO, PKG, ZIP, APP)
 - **Security-first approach**: Input validation, path security, temporary file cleanup
 - **Interactive terminal UI**: Arrow key navigation and space selection
 - **Advanced features**: Version comparison, nested DMG handling, Apple Silicon support
@@ -67,7 +67,7 @@ The Cloudflare Worker serves:
 - Installation command distribution
 
 ### Installation Script Features
-- **Multi-format support**: Handles DMG (including nested/TNT structures), PKG, ZIP, APP files
+- **Multi-format support**: Handles DMG/ISO (including nested structures), PKG, ZIP, APP files
 - **Security mechanisms**: Path validation, quarantine removal, Gatekeeper integration
 - **Smart installation logic**: Duplicate detection, version comparison, automatic updates
 - **Error handling**: Comprehensive logging and rollback capabilities

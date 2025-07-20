@@ -164,10 +164,10 @@ parse_arguments() {
     fi
     
     # 检查目录中是否有安装包
-    local package_count=$(find "$installers_path" \( -name "*.dmg" -o -name "*.pkg" -o -name "*.zip" \) ! -name "._*" ! -name ".DS_Store" | wc -l)
+    local package_count=$(find "$installers_path" \( -name "*.dmg" -o -name "*.iso" -o -name "*.pkg" -o -name "*.zip" \) ! -name "._*" ! -name ".DS_Store" | wc -l)
     
     if [ "$package_count" -eq 0 ]; then
-        error "指定目录中没有找到安装包文件 (.dmg, .pkg, .zip)"
+        error "指定目录中没有找到安装包文件 (.dmg, .iso, .pkg, .zip)"
         exit 1
     else
         LOCAL_INSTALLERS_DIR="$installers_path"
@@ -194,7 +194,7 @@ prompt_for_folder() {
     echo "   2. 将文件夹直接拖拽到这个终端窗口"
     echo "   3. 按回车键确认"
     echo ""
-    echo -e "${BLUE}支持的文件类型：${NC} .dmg、.pkg、.zip、.app"
+    echo -e "${BLUE}支持的文件类型：${NC} .dmg、.iso、.pkg、.zip、.app"
     echo ""
     
     while true; do
@@ -229,10 +229,10 @@ prompt_for_folder() {
         fi
         
         # 检查目录中是否有安装包
-        local package_count=$(find "$installers_path" \( -name "*.dmg" -o -name "*.pkg" -o -name "*.zip" -o -name "*.app" \) ! -name "._*" ! -name ".DS_Store" | wc -l)
+        local package_count=$(find "$installers_path" \( -name "*.dmg" -o -name "*.iso" -o -name "*.pkg" -o -name "*.zip" -o -name "*.app" \) ! -name "._*" ! -name ".DS_Store" | wc -l)
         
         if [ "$package_count" -eq 0 ]; then
-            error "指定目录中没有找到安装包文件 (.dmg, .pkg, .zip, .app)"
+            error "指定目录中没有找到安装包文件 (.dmg, .iso, .pkg, .zip, .app)"
             echo -e "${YELLOW}请选择包含安装包的文件夹${NC}"
             echo ""
             continue
@@ -625,7 +625,7 @@ analyze_local_packages() {
             packages_list+=("$clean_name")
             package_files_list+=("$file")
         fi
-    done < <(find "$LOCAL_INSTALLERS_DIR" \( -name "*.dmg" -o -name "*.pkg" -o -name "*.zip" -o -name "*.app" \) ! -name "._*" ! -name ".DS_Store")
+    done < <(find "$LOCAL_INSTALLERS_DIR" \( -name "*.dmg" -o -name "*.iso" -o -name "*.pkg" -o -name "*.zip" -o -name "*.app" \) ! -name "._*" ! -name ".DS_Store")
     
     # 启动交互式选择器
     interactive_package_selector
@@ -734,18 +734,18 @@ check_app_installation() {
     fi
 }
 
-# DMG挂载辅助函数
-mount_dmg() {
-    local dmg_path="$1"
+# 磁盘镜像挂载辅助函数（支持DMG和ISO）
+mount_disk_image() {
+    local image_path="$1"
     local description="$2"
     
-    echo "  正在挂载${description}: $(basename "$dmg_path")"
+    echo "  正在挂载${description}: $(basename "$image_path")"
     
     # 获取挂载前的挂载点列表
     local mount_before=$(mount | grep "/Volumes" | sed -E 's/^.* on (\/Volumes\/[^(]+) \(.*/\1/' | sed 's/[[:space:]]*$//')
     
     # 使用 yes 命令自动回答许可协议，并重定向输出，添加超时保护
-    (yes | hdiutil attach "$dmg_path" -nobrowse -noverify > /dev/null 2>&1) &
+    (yes | hdiutil attach "$image_path" -nobrowse -noverify > /dev/null 2>&1) &
     local hdiutil_pid=$!
     
     # 等待最多15秒
@@ -801,8 +801,8 @@ mount_dmg() {
     fi
 }
 
-# DMG推出辅助函数
-unmount_dmg() {
+# 磁盘镜像推出辅助函数（支持DMG和ISO）
+unmount_disk_image() {
     local mount_point="$1"
     local description="$2"
     
@@ -856,27 +856,27 @@ install_app_from_mount_point() {
     fi
 }
 
-# 嵌套DMG处理辅助函数
-install_from_nested_dmg() {
-    local nested_dmg_path="$1"
+# 嵌套磁盘镜像处理辅助函数（支持DMG和ISO）
+install_from_nested_disk_image() {
+    local nested_image_path="$1"
     local filename="$2"
     local source_description="$3"
     
     local nested_mount_point
-    if nested_mount_point=$(mount_dmg "$nested_dmg_path" "嵌套DMG"); then
-        # 尝试从嵌套DMG安装应用
+    if nested_mount_point=$(mount_disk_image "$nested_image_path" "$source_description"); then
+        # 尝试从嵌套镜像安装应用
         if install_app_from_mount_point "$nested_mount_point" "$filename" "$source_description"; then
-            unmount_dmg "$nested_mount_point" "嵌套DMG"
+            unmount_disk_image "$nested_mount_point" "$source_description"
             return 0
         else
-            echo "  ❌ 在嵌套DMG中未找到.app文件"
-            failed_installs+=("$filename (嵌套DMG中未找到.app文件)")
-            unmount_dmg "$nested_mount_point" "嵌套DMG"
+            echo "  ❌ 在${source_description}中未找到.app文件"
+            failed_installs+=("$filename (${source_description}中未找到.app文件)")
+            unmount_disk_image "$nested_mount_point" "$source_description"
             return 1
         fi
     else
-        echo "  ❌ 嵌套DMG挂载失败"
-        failed_installs+=("$filename (嵌套DMG挂载失败)")
+        echo "  ❌ ${source_description}挂载失败"
+        failed_installs+=("$filename (${source_description}挂载失败)")
         return 1
     fi
 }
@@ -890,7 +890,7 @@ install_dmg_file() {
     
     # 挂载主DMG
     local mount_point
-    if ! mount_point=$(mount_dmg "$installer_path" "主DMG"); then
+    if ! mount_point=$(mount_disk_image "$installer_path" "主DMG"); then
         failed_installs+=("$filename (DMG挂载失败)")
         return 1
     fi
@@ -939,7 +939,7 @@ install_dmg_file() {
                 
                 if [ -n "$manual_install_dmg" ]; then
                     # 安装嵌套DMG
-                    install_from_nested_dmg "$manual_install_dmg" "$filename" "嵌套DMG"
+                    install_from_nested_disk_image "$manual_install_dmg" "$filename" "嵌套DMG"
                 else
                     # 直接在Manual install目录查找.app
                     echo "  🔍 安装目录中未找到DMG文件，直接查找.app文件..."
@@ -960,7 +960,7 @@ install_dmg_file() {
                 
                 if [ -n "$nested_dmg" ]; then
                     # 安装嵌套DMG
-                    install_from_nested_dmg "$nested_dmg" "$filename" "嵌套DMG"
+                    install_from_nested_disk_image "$nested_dmg" "$filename" "嵌套DMG"
                 else
                     # 完全没找到可安装的内容
                     echo "  ❌ 在DMG中未找到 .app 文件、安装目录或嵌套DMG文件"
@@ -973,7 +973,118 @@ install_dmg_file() {
     fi
     
     # 推出主DMG
-    unmount_dmg "$mount_point" "主DMG"
+    unmount_disk_image "$mount_point" "主DMG"
+}
+
+# 安装ISO文件（与DMG处理逻辑相同）
+install_iso_file() {
+    local installer_path="$1"
+    local filename=$(basename "$installer_path")
+    
+    echo "  [类型: ISO] - 正在尝试挂载..."
+    
+    # 挂载主ISO
+    local mount_point
+    if ! mount_point=$(mount_disk_image "$installer_path" "主ISO"); then
+        failed_installs+=("$filename (ISO挂载失败)")
+        return 1
+    fi
+    
+    # 查找PKG文件并安装（优先级最高）
+    local pkg_path=""
+    shopt -s nullglob
+    local pkg_files=("$mount_point"/*.pkg)
+    if [ ${#pkg_files[@]} -gt 0 ] && [ -f "${pkg_files[0]}" ]; then
+        pkg_path="${pkg_files[0]}"
+    fi
+    shopt -u nullglob
+    
+    if [ -n "$pkg_path" ] && [ -f "$pkg_path" ]; then
+        local pkg_name=$(basename "$pkg_path")
+        echo "  发现PKG安装包: $pkg_name"
+        echo "  正在安装PKG..."
+        
+        if sudo installer -pkg "$pkg_path" -target /; then
+            echo "  PKG安装成功"
+            local pkg_base_name=$(basename "$pkg_path" .pkg)
+            successful_installs+=("$pkg_base_name (从ISO中的PKG)")
+        else
+            error "PKG安装失败"
+            failed_installs+=("$filename (ISO中的PKG安装失败)")
+        fi
+    else
+        # 没有PKG，尝试安装.app文件
+        echo "  查找 .app 文件..."
+        
+        # 尝试直接从主ISO安装应用
+        if install_app_from_mount_point "$mount_point" "$filename" "从ISO"; then
+            echo "  ✅ 主ISO安装完成"
+        else
+            # 主ISO中没有.app，检查嵌套结构
+            echo "  未找到 .app 文件，检查嵌套安装结构..."
+            
+            # 查找Manual install目录
+            local manual_install_dir=$(find "$mount_point" -name "*[Mm]anual*install*" -type d 2>/dev/null | head -1)
+            
+            if [ -n "$manual_install_dir" ]; then
+                echo "  📁 发现嵌套安装结构: $(basename "$manual_install_dir")"
+                
+                # 在Manual install目录中查找DMG或ISO文件
+                local manual_install_image=$(find "$manual_install_dir" -name "*.dmg" -o -name "*.iso" 2>/dev/null | head -1)
+                
+                if [ -n "$manual_install_image" ]; then
+                    # 获取文件扩展名以确定描述文本
+                    local ext="${manual_install_image##*.}"
+                    local desc="嵌套"
+                    if [ "$ext" = "dmg" ]; then
+                        desc="嵌套DMG"
+                    elif [ "$ext" = "iso" ]; then
+                        desc="嵌套ISO"
+                    fi
+                    # 安装嵌套镜像
+                    install_from_nested_disk_image "$manual_install_image" "$filename" "$desc"
+                else
+                    # 直接在Manual install目录查找.app
+                    echo "  🔍 安装目录中未找到镜像文件，直接查找.app文件..."
+                    if ! install_app_from_mount_point "$manual_install_dir" "$filename" "嵌套安装"; then
+                        echo "  ❌ 在安装目录中也未找到 .app 文件"
+                        failed_installs+=("$filename (安装目录中未找到.app文件)")
+                    fi
+                fi
+            else
+                # 查找其他嵌套镜像文件（备用方案）
+                echo "  🔍 查找其他嵌套镜像文件..."
+                local nested_image=$(find "$mount_point" -name "*[Mm]anual*install*.dmg" -o -name "*[Mm]anual*.dmg" -o -name "*install*.dmg" -o -name "*[Mm]anual*install*.iso" -o -name "*[Mm]anual*.iso" -o -name "*install*.iso" 2>/dev/null | head -1)
+                
+                if [ -z "$nested_image" ]; then
+                    # 查找任何DMG或ISO文件
+                    nested_image=$(find "$mount_point" -name "*.dmg" -o -name "*.iso" -type f 2>/dev/null | head -1)
+                fi
+                
+                if [ -n "$nested_image" ]; then
+                    # 获取文件扩展名以确定描述文本
+                    local ext="${nested_image##*.}"
+                    local desc="嵌套"
+                    if [ "$ext" = "dmg" ]; then
+                        desc="嵌套DMG"
+                    elif [ "$ext" = "iso" ]; then
+                        desc="嵌套ISO"
+                    fi
+                    # 安装嵌套镜像
+                    install_from_nested_disk_image "$nested_image" "$filename" "$desc"
+                else
+                    # 完全没找到可安装的内容
+                    echo "  ❌ 在ISO中未找到 .app 文件、安装目录或嵌套镜像文件"
+                    echo "  📁 ISO内容列表："
+                    ls -la "$mount_point" | head -10
+                    failed_installs+=("$filename (ISO中未找到可安装的内容)")
+                fi
+            fi
+        fi
+    fi
+    
+    # 推出主ISO
+    unmount_disk_image "$mount_point" "主ISO"
 }
 
 # 检查PKG是否已安装
@@ -1192,6 +1303,9 @@ run_direct_installation() {
             "dmg")
                 install_dmg_file "$installer_path"
                 ;;
+            "iso")
+                install_iso_file "$installer_path"
+                ;;
             "pkg")
                 install_pkg_file "$installer_path"
                 ;;
@@ -1328,15 +1442,15 @@ show_help() {
     echo "  -h, --help     显示此帮助信息"
     echo ""
     echo "参数："
-    echo "  安装包目录     包含 .dmg/.pkg/.zip/.app 文件的目录路径（可选）"
+    echo "  安装包目录     包含 .dmg/.iso/.pkg/.zip/.app 文件的目录路径（可选）"
     echo "                如果不提供，将进入交互式模式提示用户输入"
     echo ""
     echo "功能："
     echo "  • 🎯 交互式选择界面，默认全选所有软件包"
     echo "  • ⌨️  方向键 ↑↓ 移动光标，空格键切换选择状态"
     echo "  • 🔄 Ctrl+A 全选，Ctrl+N 全不选"
-    echo "  • ✅ 支持 .dmg、.pkg、.zip、.app 格式"
-    echo "  • 🔍 智能检测嵌套DMG结构和特殊安装包"
+    echo "  • ✅ 支持 .dmg、.iso、.pkg、.zip、.app 格式"
+    echo "  • 🔍 智能检测嵌套DMG/ISO结构和特殊安装包"
     echo "  • 📁 递归遍历子目录中的安装包"
     echo "  • 🔐 自动移除应用的隔离属性（quarantine）"
     echo "  • 📦 支持ZIP中的PKG安装包"
