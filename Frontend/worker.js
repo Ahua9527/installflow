@@ -58,6 +58,11 @@ const HTML_CONTENT = `<!DOCTYPE html>
                         <h3>一键执行</h3>
                         <p>通过简单的命令即可开始批量安装</p>
                     </div>
+                    <div class="feature-item">
+                        <div class="feature-icon">⚠️</div>
+                        <h3>使用须知</h3>
+                        <p>加密的DMG/ISO文件会中断自动化安装，请提前解密处理</p>
+                    </div>
                 </div>
             </section>
         </main>

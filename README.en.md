@@ -88,6 +88,18 @@ bash <(curl -fsSL https://ding.ahua.space/install)
 4. **Confirm Installation**: Press enter to start the batch installation process
 5. **View Results**: Check detailed installation report after completion
 
+### ⚠️ Important Notes
+
+**Encrypted Disk Image Limitations**:
+- Encrypted DMG or ISO files will interrupt the automated installation process
+- It's recommended to decrypt or remove password protection before use
+- The script will attempt to handle encrypted files, but may require manual intervention
+
+**Other Usage Recommendations**:
+- Ensure sufficient disk space for installation
+- When installing many applications, consider closing other resource-intensive programs
+- Do not manually operate Finder or mount/unmount disks during the installation process
+
 ## 📚 Project Architecture
 
 ### File Structure

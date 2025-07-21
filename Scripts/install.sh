@@ -1456,7 +1456,7 @@ show_help() {
     echo "  • 📦 支持ZIP中的PKG安装包"
     echo "  • 🚀 自动安装所有选中的软件包"
     echo "  • 🤖 Apple Silicon Mac自动检测并安装Rosetta"
-    echo "  • 🔓 智能绕过加密DMG文件（尝试常见密码）"
+    echo "  • ⚠️  加密DMG/ISO可能中断自动化流程，建议预先解密"
     echo "  • 📊 PKG安装检测，避免重复安装"
     echo "  • 📋 详细的安装汇总报告"
     echo ""
