@@ -113,7 +113,7 @@ body {
     align-items: center;
     text-align: center;
     padding-top: 4rem;
-    padding-bottom: 2rem;
+    padding-bottom: 0rem;
 }
 
 /* Header */
