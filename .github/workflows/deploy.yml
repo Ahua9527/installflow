@@ -70,19 +70,26 @@ jobs:
         with:
           script: |
             const deploymentUrl = 'https://installflow-dev.你的用户名.workers.dev';
+            const commitHash = context.sha.substring(0, 7);
+            const prNumber = context.issue.number;
+            
+            const message = [
+              '🚀 **Worker deployed to development environment successfully!**',
+              '',
+              '📋 **Deployment Details:**',
+              `- Environment: Development (\`installflow-dev\`)`,
+              `- Trigger: Pull Request #${prNumber}`,
+              `- Commit: \`${commitHash}\``,
+              `- Preview URL: ${deploymentUrl}`,
+              '',
+              '✅ Ready for testing and review!'
+            ].join('\n');
+            
             github.rest.issues.createComment({
-              issue_number: context.issue.number,
+              issue_number: prNumber,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `🚀 **Worker deployed to development environment successfully!**
-              
-📋 **Deployment Details:**
-- Environment: Development (\`installflow-dev\`)
-- Trigger: Pull Request #${context.issue.number}
-- Commit: \`${context.sha.substring(0, 7)}\`
-- Preview URL: ${deploymentUrl}
-
-✅ Ready for testing and review!`
+              body: message
             })
 
       - name: Create deployment status
