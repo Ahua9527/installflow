@@ -94,22 +94,9 @@ jobs:
               body: message
             })
 
-      - name: Create deployment status
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const success = '${{ job.status }}' === 'success';
-            const state = success ? 'success' : 'failure';
-            const description = success 
-              ? 'Cloudflare Workers deployment completed' 
-              : 'Cloudflare Workers deployment failed';
-            
-            github.rest.repos.createDeploymentStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              deployment_id: context.payload.deployment?.id || 0,
-              state: state,
-              description: description,
-              environment: github.event_name === 'pull_request' ? 'development' : 'production'
-            })
+      - name: Report deployment success
+        if: success()
+        run: |
+          echo "🎉 Cloudflare Workers deployment completed successfully!"
+          echo "Environment: $([ '${{ github.event_name }}' = 'pull_request' ] && echo 'development' || echo 'production')"
+          echo "Commit: ${{ github.sha }}"
