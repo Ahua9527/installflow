@@ -89,11 +89,14 @@ validate_path_security() {
 # 清理函数
 cleanup() {
     local temp_resource
-    for temp_resource in "${temp_files[@]}"; do
-        if [ -e "$temp_resource" ]; then
-            rm -rf "$temp_resource" 2>/dev/null || true
-        fi
-    done
+    # 检查数组是否存在且不为空
+    if [ ${#temp_files[@]} -gt 0 ]; then
+        for temp_resource in "${temp_files[@]}"; do
+            if [ -e "$temp_resource" ]; then
+                rm -rf "$temp_resource" 2>/dev/null || true
+            fi
+        done
+    fi
 }
 
 # 设置退出陷阱以确保清理
@@ -1470,7 +1473,7 @@ show_help() {
 # 主函数
 main() {
     # 解析参数
-    if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+    if [ $# -gt 0 ] && ([ "$1" = "-h" ] || [ "$1" = "--help" ]); then
         show_help
         exit 0
     fi
