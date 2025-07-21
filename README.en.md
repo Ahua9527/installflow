@@ -122,7 +122,7 @@ bash <(curl -fsSL https://ding.ahua.space/install)
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22+
 - Cloudflare account (for deployment)
 
 ### Development Steps

@@ -121,7 +121,7 @@ bash <(curl -fsSL https://ding.ahua.space/install)
 
 ### 前置要求
 
-- Node.js 18+
+- Node.js 22+
 - Cloudflare 账户（用于部署）
 
 ### 开发步骤
