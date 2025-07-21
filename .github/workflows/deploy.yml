@@ -21,7 +21,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     name: Deploy Worker
-    if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
 
     steps:
       - name: Checkout code
