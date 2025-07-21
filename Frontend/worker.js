@@ -58,11 +58,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
                         <h3>一键执行</h3>
                         <p>通过简单的命令即可开始批量安装</p>
                     </div>
-                    <div class="feature-item">
-                        <div class="feature-icon">⚠️</div>
-                        <h3>使用须知</h3>
-                        <p>加密的DMG/ISO文件会中断自动化安装，请提前解密处理</p>
-                    </div>
                 </div>
             </section>
         </main>
@@ -114,9 +109,11 @@ body {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: flex-start;
     align-items: center;
     text-align: center;
+    padding-top: 4rem;
+    padding-bottom: 2rem;
 }
 
 /* Header */
@@ -330,7 +327,7 @@ body {
 
 /* Footer */
 .footer {
-    margin-top: 4rem;
+    margin-top: 2rem;
     animation: fadeInUp 0.6s ease-out 0.8s both;
 }
 
