@@ -518,7 +518,7 @@ mount_and_process_nested_dmg() {
     
     # 使用增强的挂载函数
     local NESTED_MOUNT_POINT=$(mount_dmg_with_retry "$dmg_path" "$dmg_name")
-    if [ $? -ne 0 ]; then
+    if [ $? -ne 0 ] || [ -z "$NESTED_MOUNT_POINT" ]; then
         failed_installs+=("$parent_filename (嵌套DMG挂载失败: $dmg_name)")
         return 1
     fi
@@ -638,20 +638,34 @@ search_nested_install_directory() {
             else
                 echo "  [FAIL] 在安装目录中也未找到.app文件"
                 echo "  [DEBUG] 安装目录内容:"
-                ls -la "$INSTALL_DIR" | head -10
+                if [ -d "$INSTALL_DIR" ]; then
+                    ls -la "$INSTALL_DIR" 2>/dev/null | head -10 | sed 's/^/    /'
+                else
+                    echo "    安装目录不存在: $INSTALL_DIR"
+                fi
                 echo "  [DEBUG] 递归搜索.app文件:"
-                find "$INSTALL_DIR" -name "*.app" -type d 2>/dev/null | head -5
+                if [ -d "$INSTALL_DIR" ]; then
+                    find "$INSTALL_DIR" -name "*.app" -type d 2>/dev/null | head -5 | sed 's/^/    /' || echo "    未找到.app文件"
+                fi
                 failed_installs+=("$filename (${file_type}安装目录中未找到.app文件)")
             fi
         fi
     else
         echo "  [DEBUG] 未找到嵌套安装结构，显示${file_type}内容:"
         echo "  [DEBUG] 根目录内容:"
-        ls -la "$mount_point" | head -10
+        if [ -d "$mount_point" ]; then
+            ls -la "$mount_point" 2>/dev/null | head -10 | sed 's/^/    /'
+        else
+            echo "    挂载点不存在: $mount_point"
+        fi
         echo "  [DEBUG] 搜索所有.app文件:"
-        find "$mount_point" -name "*.app" -type d 2>/dev/null | head -5
+        if [ -d "$mount_point" ]; then
+            find "$mount_point" -name "*.app" -type d 2>/dev/null | head -5 | sed 's/^/    /' || echo "    未找到.app文件"
+        fi
         echo "  [DEBUG] 搜索所有子目录:"
-        find "$mount_point" -type d -maxdepth 2 2>/dev/null | head -10
+        if [ -d "$mount_point" ]; then
+            find "$mount_point" -type d -maxdepth 2 2>/dev/null | head -10 | sed 's/^/    /' || echo "    未找到子目录"
+        fi
         failed_installs+=("$filename (${file_type}中未找到.app文件)")
     fi
 }
@@ -772,7 +786,7 @@ mount_dmg_with_retry() {
     fi
     
     for attempt in $(seq 1 $max_attempts); do
-        echo "  [类型: DMG] - 挂载尝试 $attempt/$max_attempts (超时: ${timeout}秒)..."
+        echo "  [类型: DMG] - 挂载尝试 $attempt/$max_attempts (超时: ${timeout}秒)..." >&2
         
         # 获取挂载前的挂载点列表
         local mount_before=$(mount | grep "/Volumes" | sed -E 's/^.* on (\/Volumes\/[^(]+) \(.*/\1/' | sed 's/[[:space:]]*$//')
@@ -791,15 +805,15 @@ mount_dmg_with_retry() {
             sleep 1
             ((count++))
             if [ $count -eq 10 ]; then
-                echo "  等待许可协议处理..."
+                echo "  等待许可协议处理..." >&2
             elif [ $count -eq 20 ]; then
-                echo "  仍在挂载中，请稍候..."
+                echo "  仍在挂载中，请稍候..." >&2
             fi
         done
         
         # 如果进程还在运行，就终止它
         if kill -0 $hdiutil_pid 2>/dev/null; then
-            echo "  挂载超时，终止进程..."
+            echo "  挂载超时，终止进程..." >&2
             kill $hdiutil_pid 2>/dev/null
             sleep 2
             kill -9 $hdiutil_pid 2>/dev/null
@@ -829,20 +843,20 @@ mount_dmg_with_retry() {
         
         # 检查挂载是否成功
         if [ -n "$new_mount_point" ] && [ -d "$new_mount_point" ]; then
-            echo "  [OK] DMG挂载成功"
-            echo "  已挂载到: $new_mount_point"
-            echo "$new_mount_point"  # 返回挂载点
+            echo "  [OK] DMG挂载成功" >&2
+            echo "  已挂载到: $new_mount_point" >&2
+            echo "$new_mount_point"  # 只有挂载点返回到stdout
             return 0
         else
-            echo "  [FAIL] 挂载尝试 $attempt 失败"
+            echo "  [FAIL] 挂载尝试 $attempt 失败" >&2
             if [ $attempt -lt $max_attempts ]; then
-                echo "  等待3秒后重试..."
+                echo "  等待3秒后重试..." >&2
                 sleep 3
             fi
         fi
     done
     
-    echo "  [FAIL] DMG挂载失败: $filename (所有尝试均失败)"
+    echo "  [FAIL] DMG挂载失败: $filename (所有尝试均失败)" >&2
     return 1
 }
 
@@ -853,7 +867,7 @@ install_dmg_file() {
     
     # 使用新的挂载函数
     MOUNT_POINT=$(mount_dmg_with_retry "$installer_path" "$filename")
-    if [ $? -ne 0 ]; then
+    if [ $? -ne 0 ] || [ -z "$MOUNT_POINT" ]; then
         failed_installs+=("$filename (DMG挂载失败)")
         return 1
     fi
@@ -956,7 +970,7 @@ install_iso_file() {
     
     # 使用增强的挂载函数
     MOUNT_POINT=$(mount_dmg_with_retry "$installer_path" "$filename")
-    if [ $? -ne 0 ]; then
+    if [ $? -ne 0 ] || [ -z "$MOUNT_POINT" ]; then
         failed_installs+=("$filename (ISO挂载失败)")
         return 1
     fi
