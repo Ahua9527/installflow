@@ -524,8 +524,7 @@ mount_and_process_nested_dmg() {
     fi
     
     if [ -n "$NESTED_MOUNT_POINT" ] && [ -d "$NESTED_MOUNT_POINT" ]; then
-        echo "  [OK] 嵌套DMG挂载成功"
-        echo "  已挂载到: $NESTED_MOUNT_POINT"
+        # 嵌套DMG挂载成功
         
         # 首先检查是否有更深层的DMG文件（递归处理）
         local DEEPER_DMG=$(find "$NESTED_MOUNT_POINT" -name "*.dmg" -maxdepth 2 -print -quit 2>/dev/null)
@@ -545,18 +544,14 @@ mount_and_process_nested_dmg() {
                 # 使用智能APP覆盖检测
                 if check_app_installation "$NESTED_APP_PATH" "$parent_filename"; then
                     local TARGET_APP_PATH="/Applications/$APP_NAME"
-                    echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
                     if cp -R "$NESTED_APP_PATH" "/Applications/"; then
-                        echo "  拷贝完成。"
-                        
                         # 移除应用的隔离属性
-                        echo "  正在移除应用的隔离属性..."
                         xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
-                        echo "  隔离属性移除完成。"
                         
+                        echo "  ✓ 安装成功"
                         successful_installs+=("$APP_NAME (${parent_type}嵌套DMG-深度$depth)")
                     else
-                        echo "  ERROR: 拷贝失败"
+                        echo "  ✗ 安装失败 - 拷贝错误"
                         failed_installs+=("$parent_filename (${parent_type}嵌套DMG应用拷贝失败: $APP_NAME)")
                     fi
                 fi
@@ -568,13 +563,9 @@ mount_and_process_nested_dmg() {
         fi
         
         # 推出嵌套DMG
-        echo "  正在推出嵌套DMG: $dmg_name..."
         sleep 1
-        if hdiutil detach "$NESTED_MOUNT_POINT" -quiet 2>/dev/null; then
-            echo "  [OK] 嵌套DMG推出完成。"
-        else
+        if ! hdiutil detach "$NESTED_MOUNT_POINT" -quiet 2>/dev/null; then
             sudo hdiutil detach "$NESTED_MOUNT_POINT" -force -quiet 2>/dev/null || true
-            echo "  [OK] 嵌套DMG强制推出完成。"
         fi
     fi
 }
@@ -620,18 +611,14 @@ search_nested_install_directory() {
                 # 使用智能APP覆盖检测
                 if check_app_installation "$INSTALL_APP_PATH" "$filename"; then
                     local TARGET_APP_PATH="/Applications/$APP_NAME"
-                    echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
                     if cp -R "$INSTALL_APP_PATH" "/Applications/"; then
-                        echo "  拷贝完成。"
-                        
                         # 移除应用的隔离属性
-                        echo "  正在移除应用的隔离属性..."
                         xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
-                        echo "  隔离属性移除完成。"
                         
+                        echo "  ✓ 安装成功"
                         successful_installs+=("$APP_NAME (${file_type}嵌套目录)")
                     else
-                        echo "  ERROR: 拷贝失败"
+                        echo "  ✗ 安装失败 - 拷贝错误"
                         failed_installs+=("$filename (${file_type}嵌套目录应用拷贝失败: $APP_NAME)")
                     fi
                 fi
@@ -776,87 +763,27 @@ mount_dmg_with_retry() {
     local filename="$2"
     local max_attempts="${3:-3}"  # 默认3次尝试
     
-    # 根据文件大小动态调整超时时间
-    local file_size=$(stat -f%z "$installer_path" 2>/dev/null || echo "0")
-    local timeout=30  # 基础超时30秒
-    if [ "$file_size" -gt 500000000 ]; then  # 大于500MB
-        timeout=60
-    elif [ "$file_size" -gt 100000000 ]; then  # 大于100MB
-        timeout=45
-    fi
-    
-    for attempt in $(seq 1 $max_attempts); do
-        echo "  [类型: DMG] - 挂载尝试 $attempt/$max_attempts (超时: ${timeout}秒)..." >&2
+    for attempt in $(seq 1 $max_attempts); do        
+        # 直接使用hdiutil attach并获取输出
+        local mount_output=$(hdiutil attach "$installer_path" -nobrowse -noverify 2>&1)
+        local mount_result=$?
         
-        # 获取挂载前的挂载点列表
-        local mount_before=$(mount | grep "/Volumes" | sed -E 's/^.* on (\/Volumes\/[^(]+) \(.*/\1/' | sed 's/[[:space:]]*$//')
-        
-        # 使用 yes 命令自动回答许可协议，并重定向输出，添加超时保护
-        (yes | hdiutil attach "$installer_path" -nobrowse -noverify > /dev/null 2>&1) &
-        local hdiutil_pid=$!
-        
-        # 等待挂载完成
-        local count=0
-        while [ $count -lt $timeout ]; do
-            if ! kill -0 $hdiutil_pid 2>/dev/null; then
-                # 进程已结束
-                break
+        if [ $mount_result -eq 0 ] && [ -n "$mount_output" ]; then
+            # 从hdiutil输出中提取挂载点
+            local mount_point=$(echo "$mount_output" | grep '/Volumes/' | sed -E 's/.*\t([^[:space:]]+.*)/\1/' | tail -n1)
+            
+            if [ -n "$mount_point" ] && [ -d "$mount_point" ]; then
+                echo "$mount_point"  # 只有挂载点返回到stdout
+                return 0
             fi
-            sleep 1
-            ((count++))
-            if [ $count -eq 10 ]; then
-                echo "  等待许可协议处理..." >&2
-            elif [ $count -eq 20 ]; then
-                echo "  仍在挂载中，请稍候..." >&2
-            fi
-        done
-        
-        # 如果进程还在运行，就终止它
-        if kill -0 $hdiutil_pid 2>/dev/null; then
-            echo "  挂载超时，终止进程..." >&2
-            kill $hdiutil_pid 2>/dev/null
-            sleep 2
-            kill -9 $hdiutil_pid 2>/dev/null
         fi
         
-        # 等待一下让挂载完成
-        sleep 2
-        
-        # 获取挂载后的挂载点列表
-        local mount_after=$(mount | grep "/Volumes" | sed -E 's/^.* on (\/Volumes\/[^(]+) \(.*/\1/' | sed 's/[[:space:]]*$//')
-        
-        # 找出新增的挂载点
-        local new_mount_point=""
-        while IFS= read -r mount_path; do
-            local found=0
-            while IFS= read -r existing_mount; do
-                if [ "$existing_mount" = "$mount_path" ]; then
-                    found=1
-                    break
-                fi
-            done <<< "$mount_before"
-            if [ $found -eq 0 ]; then
-                new_mount_point="$mount_path"
-                break
-            fi
-        done <<< "$mount_after"
-        
-        # 检查挂载是否成功
-        if [ -n "$new_mount_point" ] && [ -d "$new_mount_point" ]; then
-            echo "  [OK] DMG挂载成功" >&2
-            echo "  已挂载到: $new_mount_point" >&2
-            echo "$new_mount_point"  # 只有挂载点返回到stdout
-            return 0
-        else
-            echo "  [FAIL] 挂载尝试 $attempt 失败" >&2
-            if [ $attempt -lt $max_attempts ]; then
-                echo "  等待3秒后重试..." >&2
-                sleep 3
-            fi
+        if [ $attempt -lt $max_attempts ]; then
+            sleep 3
         fi
     done
     
-    echo "  [FAIL] DMG挂载失败: $filename (所有尝试均失败)" >&2
+    echo "  错误: DMG挂载失败 ($filename)" >&2
     return 1
 }
 
@@ -884,15 +811,14 @@ install_dmg_file() {
     # 安装PKG（如果存在）
     if [ -n "$PKG_PATH" ] && [ -f "$PKG_PATH" ]; then
         PKG_NAME=$(basename "$PKG_PATH")
-        echo "  发现PKG安装包: $PKG_NAME"
         echo "  正在安装PKG..."
         
         if sudo installer -pkg "$PKG_PATH" -target /; then
-            echo "  PKG安装成功"
+            echo "  ✓ PKG安装成功"
             local pkg_name=$(basename "$PKG_PATH" .pkg)
             successful_installs+=("$pkg_name (从DMG中的PKG)")
         else
-            echo "  ERROR: PKG安装失败"
+            echo "  ✗ PKG安装失败"
             failed_installs+=("$filename (DMG中的PKG安装失败)")
         fi
     fi
@@ -906,8 +832,6 @@ install_dmg_file() {
             echo "  [PKG] 在DMG中发现嵌套DMG文件: $(basename "$NESTED_DMG")"
             mount_and_process_nested_dmg "$NESTED_DMG" "DMG" "$filename" 1
         else
-            echo "  查找 .app 文件..."
-            
             APP_PATH=""
             shopt -s nullglob  # 启用nullglob
             app_files=("$MOUNT_POINT"/*.app)
@@ -919,28 +843,22 @@ install_dmg_file() {
             if [ -n "$APP_PATH" ]; then
                 # 常规DMG包含.app文件
                 APP_NAME=$(basename "$APP_PATH")
-                echo "  找到应用: $APP_NAME"
                 
                 # 使用智能APP覆盖检测（带版本号比较）
                 if check_app_installation "$APP_PATH" "$filename"; then
                     TARGET_APP_PATH="/Applications/$APP_NAME"
-                    echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
                     if cp -R "$APP_PATH" "/Applications/"; then
-                        echo "  拷贝完成。"
-                        
                         # 移除应用的隔离属性
-                        echo "  正在移除应用的隔离属性..."
                         xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
-                        echo "  隔离属性移除完成。"
                         
+                        echo "  ✓ 安装成功"
                         successful_installs+=("$APP_NAME (从DMG)")
                     else
-                        echo "  ERROR: 拷贝失败"
+                        echo "  ✗ 安装失败 - 拷贝错误"
                         failed_installs+=("$filename (应用拷贝失败: $APP_NAME)")
                     fi
                 fi
             else
-                echo "  未找到 .app 文件，检查嵌套安装结构..."
                 # 调用通用的嵌套目录搜索函数
                 search_nested_install_directory "$MOUNT_POINT" "DMG" "$filename"
             fi
@@ -948,16 +866,9 @@ install_dmg_file() {
     fi
     
     # 推出DMG
-    echo "  正在推出DMG: $filename..."
     sleep 1
-    
-    if hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null; then
-        echo "  [OK] DMG推出完成。"
-    else
-        # 尝试强制推出
-        if sudo hdiutil detach "$MOUNT_POINT" -force -quiet 2>/dev/null; then
-            echo "  [OK] DMG强制推出完成。"
-        else
+    if ! hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null; then
+        if ! sudo hdiutil detach "$MOUNT_POINT" -force -quiet 2>/dev/null; then
             warn "DMG推出失败，但这不影响正常使用"
         fi
     fi
@@ -1001,23 +912,20 @@ install_iso_file() {
         # 安装PKG（如果存在）
         if [ -n "$PKG_PATH" ] && [ -f "$PKG_PATH" ]; then
             PKG_NAME=$(basename "$PKG_PATH")
-            echo "  发现PKG安装包: $PKG_NAME"
             echo "  正在安装PKG..."
             
             if sudo installer -pkg "$PKG_PATH" -target /; then
-                echo "  PKG安装成功"
+                echo "  ✓ PKG安装成功"
                 local pkg_name=$(basename "$PKG_PATH" .pkg)
                 successful_installs+=("$pkg_name (从ISO中的PKG)")
             else
-                echo "  ERROR: PKG安装失败"
+                echo "  ✗ PKG安装失败"
                 failed_installs+=("$filename (ISO中的PKG安装失败)")
             fi
         fi
         
         # 查找并安装.app文件（只有在没有PKG时）
         if [ -z "$PKG_PATH" ]; then
-            echo "  查找 .app 文件..."
-            
             APP_PATH=""
             shopt -s nullglob  # 启用nullglob
             app_files=("$MOUNT_POINT"/*.app)
@@ -1029,28 +937,22 @@ install_iso_file() {
             if [ -n "$APP_PATH" ]; then
                 # 常规ISO包含.app文件
                 APP_NAME=$(basename "$APP_PATH")
-                echo "  找到应用: $APP_NAME"
                 
                 # 使用智能APP覆盖检测（带版本号比较）
                 if check_app_installation "$APP_PATH" "$filename"; then
                     TARGET_APP_PATH="/Applications/$APP_NAME"
-                    echo "  正在将 '$APP_NAME' 拷贝到 /Applications ..."
                     if cp -R "$APP_PATH" "/Applications/"; then
-                        echo "  拷贝完成。"
-                        
                         # 移除应用的隔离属性
-                        echo "  正在移除应用的隔离属性..."
                         xattr -r -d com.apple.quarantine "$TARGET_APP_PATH" 2>/dev/null || true
-                        echo "  隔离属性移除完成。"
                         
+                        echo "  ✓ 安装成功"
                         successful_installs+=("$APP_NAME (从ISO)")
                     else
-                        echo "  ERROR: 拷贝失败"
+                        echo "  ✗ 安装失败 - 拷贝错误"
                         failed_installs+=("$filename (应用拷贝失败: $APP_NAME)")
                     fi
                 fi
             else
-                echo "  未找到 .app 文件，检查嵌套安装结构..."
                 # 调用通用的嵌套目录搜索函数
                 search_nested_install_directory "$MOUNT_POINT" "ISO" "$filename"
             fi
@@ -1058,16 +960,9 @@ install_iso_file() {
     fi
     
     # 推出ISO
-    echo "  正在推出ISO: $filename..."
     sleep 1
-    
-    if hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null; then
-        echo "  [OK] ISO推出完成。"
-    else
-        # 尝试强制推出
-        if sudo hdiutil detach "$MOUNT_POINT" -force -quiet 2>/dev/null; then
-            echo "  [OK] ISO强制推出完成。"
-        else
+    if ! hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null; then
+        if ! sudo hdiutil detach "$MOUNT_POINT" -force -quiet 2>/dev/null; then
             warn "ISO推出失败，但这不影响正常使用"
         fi
     fi
@@ -1078,14 +973,14 @@ install_pkg_file() {
     local installer_path="$1"
     local filename=$(basename "$installer_path")
     
-    echo "  [类型: PKG] - 正在安装PKG包..."
+    echo "  正在安装PKG..."
     
     if sudo installer -pkg "$installer_path" -target /; then
-        echo "  [OK] PKG安装成功"
+        echo "  ✓ PKG安装成功"
         local pkg_name=$(basename "$installer_path" .pkg)
         successful_installs+=("$pkg_name")
     else
-        echo "  [FAIL] PKG安装失败"
+        echo "  ✗ PKG安装失败"
         failed_installs+=("$filename (PKG安装失败)")
     fi
 }
@@ -1135,18 +1030,14 @@ install_zip_file() {
                     # 使用智能APP覆盖检测
                     if check_app_installation "$app_path" "$filename"; then
                         local target_app_path="/Applications/$app_name"
-                        echo "  正在将 '$app_name' 拷贝到 /Applications ..."
                         if cp -R "$app_path" "/Applications/"; then
-                            echo "  拷贝完成。"
-                            
                             # 移除应用的隔离属性
-                            echo "  正在移除应用的隔离属性..."
                             xattr -r -d com.apple.quarantine "$target_app_path" 2>/dev/null || true
-                            echo "  隔离属性移除完成。"
                             
+                            echo "  ✓ 安装成功"
                             successful_installs+=("$app_name (从ZIP)")
                         else
-                            echo "  ERROR: 拷贝失败"
+                            echo "  ✗ 安装失败 - 拷贝错误"
                             failed_installs+=("$filename (ZIP应用拷贝失败: $app_name)")
                         fi
                     fi
@@ -1176,18 +1067,14 @@ install_app_file() {
     # 使用智能APP覆盖检测
     if check_app_installation "$installer_path" "$filename"; then
         local target_app_path="/Applications/$app_name"
-        echo "  正在将 '$app_name' 拷贝到 /Applications ..."
         if cp -R "$installer_path" "/Applications/"; then
-            echo "  拷贝完成。"
-            
             # 移除应用的隔离属性
-            echo "  正在移除应用的隔离属性..."
             xattr -r -d com.apple.quarantine "$target_app_path" 2>/dev/null || true
-            echo "  隔离属性移除完成。"
             
+            echo "  ✓ 安装成功"
             successful_installs+=("$app_name (直接拷贝)")
         else
-            echo "  ERROR: 拷贝失败"
+            echo "  ✗ 安装失败 - 拷贝错误"
             failed_installs+=("$filename (APP拷贝失败)")
         fi
     fi
@@ -1308,6 +1195,17 @@ show_install_summary() {
 main() {
     # 检查系统要求
     check_requirements
+    
+    # 预先获取sudo权限
+    echo ""
+    echo "正在获取管理员权限（用于PKG安装和系统操作）..."
+    echo "提示：输入密码后将缓存权限，避免安装过程中重复输入"
+    if timeout 30 sudo -v 2>/dev/null; then
+        log "管理员权限获取成功"
+    else
+        warn "管理员权限获取失败，PKG安装时将重新请求权限"
+    fi
+    echo ""
     
     # 解析命令行参数
     parse_arguments "$@"
