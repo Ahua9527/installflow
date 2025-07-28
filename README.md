@@ -10,6 +10,7 @@
 
 [English](./README.en.md) · 简体中文 · [Demo](https://ding.ahua.space)
 </div>
+
 ## 📖 项目介绍
 
 InstallFlow (叮当装) 是一个专为 macOS 设计的本地安装包批量处理工具。它可以帮助您快速安装已下载到本地的应用程序文件，无需逐个手动处理 DMG、PKG 等格式的安装包。
