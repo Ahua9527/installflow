@@ -1,0 +1,102 @@
+name: Deploy to Cloudflare Workers
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Frontend/**'
+      - 'Scripts/**'
+      - '.github/workflows/deploy.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'Frontend/**'
+      - 'Scripts/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy Worker
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Wrangler CLI
+        run: |
+          npm install -g wrangler
+          wrangler --version
+
+      - name: Validate Cloudflare Token
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "❌ CLOUDFLARE_API_TOKEN secret is not set"
+            exit 1
+          fi
+          echo "✅ Cloudflare API token is configured"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Deploy to Cloudflare Workers (Development)
+        if: github.event_name == 'pull_request'
+        run: |
+          cd Frontend
+          echo "🚀 Deploying to development environment..."
+          wrangler deploy --env development
+          echo "✅ Development deployment completed"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Deploy to Cloudflare Workers (Production)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          cd Frontend
+          echo "🚀 Deploying to production environment..."
+          wrangler deploy --env production
+          echo "✅ Production deployment completed"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Comment PR with deployment info
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deploymentUrl = 'https://installflow-dev.你的用户名.workers.dev';
+            const commitHash = context.sha.substring(0, 7);
+            const prNumber = context.issue.number;
+            
+            const message = [
+              '🚀 **Worker deployed to development environment successfully!**',
+              '',
+              '📋 **Deployment Details:**',
+              `- Environment: Development (\`installflow-dev\`)`,
+              `- Trigger: Pull Request #${prNumber}`,
+              `- Commit: \`${commitHash}\``,
+              `- Preview URL: ${deploymentUrl}`,
+              '',
+              '✅ Ready for testing and review!'
+            ].join('\n');
+            
+            github.rest.issues.createComment({
+              issue_number: prNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: message
+            })
+
+      - name: Report deployment success
+        if: success()
+        run: |
+          echo "🎉 Cloudflare Workers deployment completed successfully!"
+          echo "Environment: $([ '${{ github.event_name }}' = 'pull_request' ] && echo 'development' || echo 'production')"
+          echo "Commit: ${{ github.sha }}"

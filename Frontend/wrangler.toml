@@ -1,0 +1,25 @@
+name = "installflow"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# 自定义域名配置
+# 部署后需要在 Cloudflare Dashboard 中配置域名绑定
+
+# 环境变量（可选）
+[vars]
+# 可以在这里添加环境变量
+
+# 生产环境配置
+[env.production]
+name = "installflow-prod"
+
+[env.production.vars]
+# 可以在这里添加生产环境特定的环境变量
+
+# 开发环境配置  
+[env.development]
+name = "installflow-dev"
+
+[env.development.vars]
+# 可以在这里添加开发环境特定的环境变量
