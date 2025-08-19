@@ -625,7 +625,7 @@ mount_and_process_nested_dmg() {
     
     if [ -n "$NESTED_MOUNT_POINT" ] && [ -d "$NESTED_MOUNT_POINT" ]; then
         
-        local DEEPER_DMG=$(find "$NESTED_MOUNT_POINT" -name "*.dmg" -maxdepth 2 -print -quit 2>/dev/null)
+        local DEEPER_DMG=$(find "$NESTED_MOUNT_POINT" -name "*.dmg" -maxdepth 2 ! -name "._*" -print -quit 2>/dev/null)
         
         if [ -n "$DEEPER_DMG" ]; then
             echo "  [PKG] 发现更深层DMG文件，递归处理..."
@@ -709,7 +709,7 @@ search_nested_install_directory() {
         if [ -n "$NESTED_DMG" ]; then
             mount_and_process_nested_dmg "$NESTED_DMG" "$file_type" "$filename"
         else
-            local INSTALL_PKG_PATH=$(find "$INSTALL_DIR" -name "*.pkg" -type f -print -quit 2>/dev/null)
+            local INSTALL_PKG_PATH=$(find "$INSTALL_DIR" -name "*.pkg" -type f ! -name "._*" -print -quit 2>/dev/null)
             
             if [ -n "$INSTALL_PKG_PATH" ] && [ -f "$INSTALL_PKG_PATH" ]; then
                 echo "  正在安装PKG..."
@@ -964,7 +964,7 @@ install_dmg_file() {
     fi
     
     if [ -z "$PKG_PATH" ]; then
-        local NESTED_DMG=$(find "$MOUNT_POINT" -name "*.dmg" -maxdepth 2 -print -quit 2>/dev/null)
+        local NESTED_DMG=$(find "$MOUNT_POINT" -name "*.dmg" -maxdepth 2 ! -name "._*" -print -quit 2>/dev/null)
         
         if [ -n "$NESTED_DMG" ]; then
             echo "  [PKG] 在DMG中发现嵌套DMG文件: $(basename "$NESTED_DMG")"
@@ -1115,11 +1115,11 @@ install_zip_file() {
     if unzip -q "$installer_path" -d "$temp_dir"; then
         echo "  ZIP解压完成"
         
-        local dmg_path=$(find "$temp_dir" -name "*.dmg" -type f -print -quit 2>/dev/null)
+        local dmg_path=$(find "$temp_dir" -name "*.dmg" -type f ! -name "._*" -print -quit 2>/dev/null)
         if [ -n "$dmg_path" ]; then
             mount_and_process_nested_dmg "$dmg_path" "ZIP" "$filename"
         else
-            local pkg_path=$(find "$temp_dir" -name "*.pkg" -type f -print -quit 2>/dev/null)
+            local pkg_path=$(find "$temp_dir" -name "*.pkg" -type f ! -name "._*" -print -quit 2>/dev/null)
             if [ -n "$pkg_path" ]; then
                 echo "  正在安装PKG..."
                 if sudo installer -pkg "$pkg_path" -target /; then
