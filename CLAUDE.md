@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Frontend Development
 ```bash
 cd Frontend
-wrangler dev                           # Start local development server
+wrangler dev                           # Start local development server (localhost:8787)
 wrangler deploy --env development      # Deploy to development environment
 wrangler deploy --env production       # Deploy to production environment
 ```
@@ -19,7 +19,13 @@ wrangler deploy --env production       # Deploy to production environment
 ### Script Testing
 ```bash
 bash Scripts/install.sh                # Test installation script locally
+bash Scripts/install.sh /path/to/apps  # Test with specific directory
 ```
+
+### Prerequisites
+- **Node.js 22+** for Wrangler CLI
+- **Cloudflare account** with API token configured
+- **macOS 10.15+** for script testing
 
 ### Deployment
 - Deployment is automated via GitHub Actions on push to main branch
@@ -47,7 +53,9 @@ bash Scripts/install.sh                # Test installation script locally
 ### CI/CD Pipeline (`.github/workflows/deploy.yml`)
 - **Automated deployment** to both development and production environments
 - **Node.js 22** with Wrangler CLI for Cloudflare Workers deployment
-- **Environment-specific deployments** based on branch and manual triggers
+- **Environment-specific deployments**: PR → development, main push → production
+- **Path-based triggers**: Only deploys when Frontend/, Scripts/, or workflow files change
+- **PR comments**: Automatic deployment status updates with preview URLs
 
 ## Key Technical Details
 
@@ -69,9 +77,11 @@ bash Scripts/install.sh                # Test installation script locally
 
 ### Web Frontend Structure
 - **Single file architecture** with embedded resources in `Frontend/worker.js`
-- **Fetch event handler** manages all routing (line ~1)
-- **HTML template** embedded as template literals (line ~100)
-- **CSS styles** inlined for performance (line ~200)
+- **Fetch event handler** manages all routing (line 819)
+- **HTML template** embedded as template literals (line 28-135)
+- **CSS styles** with glassmorphism effects (line 136-690)  
+- **JavaScript functionality** for clipboard operations (line 691-818)
+- **Zero build step**: All resources inlined for direct deployment
 
 ### Security Implementation
 - **Path validation** prevents command injection attacks
@@ -91,10 +101,11 @@ bash Scripts/install.sh                # Test installation script locally
 - Check sudo keepalive mechanism and cleanup functions
 
 ### Frontend Development
-- Uses Cloudflare Workers runtime environment
+- Uses Cloudflare Workers runtime environment with Node.js compatibility
 - No build step required - deploy directly from source
 - Environment variables configured in `wrangler.toml`
 - Custom domains: ding.ahua.space (main), gh.ahua.space (script proxy)
+- **Development workflow**: Edit `worker.js` → `wrangler dev` → test → deploy
 
 ### Code Conventions
 - **Bash script**: Professional error handling with comprehensive cleanup
@@ -112,9 +123,11 @@ bash Scripts/install.sh                # Test installation script locally
 - Custom route configurations for domain mapping
 
 ### GitHub Actions
-- Automatic deployment on main branch push
-- PR environment deployments for testing
-- Cloudflare API token validation before deployment
+- **Triggers**: Push to main (production), PR (development), manual workflow dispatch
+- **Path filtering**: Only triggers on Frontend/, Scripts/, or workflow changes  
+- **Environment separation**: `installflow-prod` (production), `installflow-dev` (development)
+- **Security**: Cloudflare API token validation before deployment
+- **Notifications**: Automatic PR comments with deployment status and preview URLs
 
 ## Recent Updates
 
