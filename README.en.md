@@ -34,6 +34,7 @@ InstallFlow is a batch processing tool designed for macOS to help you quickly in
 ### 🛡️ Security Mechanisms
 - **Path Validation**: Strict path security checks to prevent command injection
 - **Sudo Permission Management**: Background keepalive mechanism to maintain admin privileges
+- **Hidden File Filtering**: Intelligently exclude macOS resource fork files (._*) and system files (.DS_Store)
 - **Temporary File Cleanup**: Automatically clean up temporary files during installation
 - **Permission Handling**: Auto-remove quarantine attributes to ensure apps run properly
 - **Version Detection**: Intelligent app version detection with automatic update or skip duplicate installations
@@ -105,6 +106,7 @@ bash <(curl -fsSL https://ding.ahua.space/install)
 - Ensure sufficient disk space for installation
 - When installing many applications, consider closing other resource-intensive programs
 - Do not manually operate Finder or mount/unmount disks during the installation process
+- Script automatically excludes system hidden files, ensuring only real installation packages are processed
 
 ## 📚 Project Architecture
 
@@ -149,11 +151,11 @@ README.en.md         # English project documentation
 ### Core Components
 
 #### Installation Script (`Scripts/install.sh`)
-- **File Scanning**: Intelligently scan local directories for installation packages
+- **File Scanning**: Intelligently scan local directories for installation packages, automatically excluding system hidden files
 - **Format Detection**: Automatically identify different installation file formats
 - **Interactive Interface**: Graphical selection experience within terminal (with arrow key navigation and pagination)
 - **Version Management**: Intelligent version comparison with automatic update detection
-- **Nested Processing**: Support for multi-level nested DMG/ISO structure handling
+- **Nested Processing**: Support for multi-level nested DMG/ISO structure handling, properly handling resource fork files
 - **Installation Processing**: Use appropriate installation methods based on file format
 - **Error Handling**: Comprehensive error recovery and logging
 - **Chinese Documentation**: Every function has detailed Chinese comments and explanations
@@ -186,7 +188,7 @@ README.en.md         # English project documentation
 3. **Local Development Server**
    ```bash
    cd Frontend
-   wrangler dev
+   wrangler dev                    # Start development server (localhost:8787)
    ```
 
 4. **Deploy to Development Environment**
@@ -196,7 +198,8 @@ README.en.md         # English project documentation
 
 5. **Test Installation Script**
    ```bash
-   bash Scripts/install.sh
+   bash Scripts/install.sh                    # Test in current directory
+   bash Scripts/install.sh /path/to/apps      # Test with specific package directory
    ```
 
 ## 🤝 Contributing
