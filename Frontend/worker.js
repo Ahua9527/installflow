@@ -21,6 +21,11 @@
  * - 支持缓存控制优化性能
  */
 
+import {
+  INSTALL_SCRIPT_CONTENT,
+  INSTALL_SCRIPT_SHA256
+} from './install-script.generated.js';
+
 /* ================================
  * HTML 页面模板
  * 包含完整的页面结构，采用语义化标签和现代化布局
@@ -832,12 +837,18 @@ export default {
      * ===================================== */
 
     // 安装脚本路由：/install
-    // 重定向到 GitHub 代理服务，获取安装脚本
+    // 返回同源脚本文本，避免依赖外部可变代理
     if (pathname === '/install') {
-      return Response.redirect(
-        'https://gh.ahua.space/https://raw.githubusercontent.com/Ahua9527/installflow/main/Scripts/install.sh', 
-        302  // 临时重定向
-      );
+      return new Response(INSTALL_SCRIPT_CONTENT, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Content-Disposition': 'inline; filename="install.sh"',
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+          'X-Install-Script-Sha256': INSTALL_SCRIPT_SHA256
+        }
+      });
     }
 
     // CSS 样式路由：/assets/css/style.css
