@@ -60,34 +60,62 @@ bash Scripts/install.sh /path/to/apps  # Test with specific directory
 ## Key Technical Details
 
 ### Installation Script Architecture
-- **Entry point**: `Scripts/install.sh:main()` function at line 1314
+- **Entry point**: `Scripts/install.sh:main()` function
 - **Core functions**:
-  - `analyze_local_packages()` - Package analysis and file scanning (line 554)
-  - `interactive_package_selector()` - Terminal UI for package selection (line 362)
-  - `install_dmg_file()` - DMG file installation handler (line 934)
-  - `install_pkg_file()` - PKG file installation handler (line 1090)
-  - `check_app_installation()` - Version comparison and app checking (line 834)
-  - `mount_and_process_nested_dmg()` - Nested DMG processing (line 599)
-  - `show_install_summary()` - Installation result reporting (line 1232)
+  - `analyze_local_packages()` - Package analysis and file scanning with hidden file filtering
+  - `interactive_package_selector()` - Terminal UI with arrow keys, space bar, pagination (30 items/page)
+  - `install_dmg_file()` - DMG file installation with nested structure support
+  - `install_pkg_file()` - PKG file installation handler
+  - `check_app_installation()` - Version comparison with semantic versioning
+  - `mount_and_process_nested_dmg()` - Recursive processing up to 5 levels deep
+  - `show_install_summary()` - Installation result reporting with statistics
 - **Utility functions**:
-  - `start_sudo_keepalive()` - Background sudo permission management (line 74)
-  - `get_app_version()` - Extract version from app bundles (line 784)
-  - `compare_versions()` - Semantic version comparison (line 807)
-  - `check_rosetta_status()` - Apple Silicon compatibility check (line 250)
+  - `start_sudo_keepalive()` - Background sudo permission refresh every 240 seconds
+  - `get_app_version()` - Extract version from CFBundleShortVersionString or CFBundleVersion
+  - `compare_versions()` - Semantic version comparison using `sort -V`
+  - `check_rosetta_status()` - Apple Silicon compatibility check with installation guidance
 
 ### Web Frontend Structure
-- **Single file architecture** with embedded resources in `Frontend/worker.js`
-- **Fetch event handler** manages all routing (line 819)
-- **HTML template** embedded as template literals (line 28-135)
-- **CSS styles** with glassmorphism effects (line 136-690)  
-- **JavaScript functionality** for clipboard operations (line 691-818)
-- **Zero build step**: All resources inlined for direct deployment
+- **Single file architecture** with all resources embedded in `Frontend/worker.js`
+- **Design rationale**: Zero build step for instant deployment to Cloudflare Workers edge network
+- **Route structure**:
+  - `/` serves HTML page with embedded CSS and JavaScript
+  - `/install` proxies to GitHub raw script URL
+  - `/assets/*` serves embedded static resources
+- **Zero dependencies**: Pure JavaScript with no npm packages required
+
+### Critical Implementation Details
+
+#### Hidden File Filtering (macOS Specific)
+- **Problem**: macOS creates `._*` resource fork files on non-HFS+ filesystems (FAT32, exFAT)
+- **Solution**: `analyze_local_packages()` filters out:
+  - Resource fork files: `._*` (AppleDouble format)
+  - System metadata: `.DS_Store`
+- **Implementation**: Checks file content for `AppleDouble` magic bytes to distinguish from legitimate files
+
+#### Version Management Strategy
+- **Detection**: Extracts version from app bundle Info.plist
+- **Comparison**: Uses `sort -V` for semantic versioning (handles 1.2.3, 2.0.0-beta, etc.)
+- **Decision logic**:
+  - Not installed → Install
+  - Package version > installed version → Update
+  - Package version ≤ installed version → Skip
+
+#### Nested Structure Processing
+- **Supported scenarios**:
+  - DMG containing DMG (up to 5 levels)
+  - DMG containing PKG and APP files
+  - ISO containing nested DMG structures
+  - ZIP containing DMG or APP files
+- **Processing order**: PKG files processed first, then DMG, then APP
+- **Mount management**: Automatic mounting and cleanup to prevent resource leaks
 
 ### Security Implementation
 - **Path validation** prevents command injection attacks
-- **Sudo privilege management** with automatic keepalive
-- **Temporary file cleanup** on script exit or interruption
-- **Quarantine attribute removal** for downloaded applications
+- **Sudo privilege management** with automatic keepalive and cleanup on exit
+- **Temporary file cleanup** on script exit or interruption (SIGINT, SIGTERM)
+- **Quarantine attribute removal** via `xattr -d -r com.apple.quarantine`
+- **Signal handling**: Comprehensive cleanup for all exit scenarios
 
 ## Development Notes
 
@@ -108,40 +136,43 @@ bash Scripts/install.sh /path/to/apps  # Test with specific directory
 - **Development workflow**: Edit `worker.js` → `wrangler dev` → test → deploy
 
 ### Code Conventions
-- **Bash script**: Professional error handling with comprehensive cleanup
-- **JavaScript**: Vanilla JS with async/await patterns
-- **Logging**: Colored terminal output with timestamps for user feedback
-- **Error handling**: Comprehensive error recovery and cleanup
-- **Documentation**: All bash functions documented in Chinese with detailed explanations
-- **Comments**: Chinese comments explain functionality, implementation details, and technical concepts
+- **Bash script**:
+  - Professional error handling with comprehensive cleanup functions
+  - All functions documented in Chinese with detailed explanations
+  - Chinese comments explain functionality, implementation details, and technical concepts
+  - Colored logging with timestamps: `log()`, `warn()`, `error()`, `info()`
+- **JavaScript**:
+  - Vanilla JS with no external dependencies
+  - Embedded inline for zero build step
+  - Modern async/await patterns where needed
+- **Error handling**: Comprehensive error recovery and cleanup for all exit scenarios
 
 ## Project Configuration
 
 ### Wrangler Configuration (`Frontend/wrangler.toml`)
 - Supports both development and production environments
-- Node.js compatibility flags enabled
+- Node.js compatibility flags enabled (`nodejs_compat`)
 - Custom route configurations for domain mapping
 
 ### GitHub Actions
 - **Triggers**: Push to main (production), PR (development), manual workflow dispatch
-- **Path filtering**: Only triggers on Frontend/, Scripts/, or workflow changes  
+- **Path filtering**: Only triggers on Frontend/, Scripts/, or workflow changes
 - **Environment separation**: `installflow-prod` (production), `installflow-dev` (development)
 - **Security**: Cloudflare API token validation before deployment
 - **Notifications**: Automatic PR comments with deployment status and preview URLs
 
-## Recent Updates
+## Important Notes
 
-### Chinese Documentation (Latest)
-- **Complete Chinese documentation** added to `Scripts/install.sh`
-- **All functions documented** with detailed explanations of functionality and implementation
-- **Technical concepts explained** including macOS-specific features like Rosetta, DMG mounting, and quarantine attributes
-- **Code structure clarified** with organized sections and clear function purposes
-- **Maintenance improved** with comprehensive comments for future development
+### macOS-Specific Considerations
+- **Encrypted DMG/ISO files**: Cannot be processed automatically - user intervention required
+- **Resource fork files**: Automatically filtered out to prevent installation errors
+- **Rosetta detection**: Script automatically detects Apple Silicon and prompts for Rosetta if needed
+- **Quarantine attributes**: Automatically removed to ensure apps can launch without warnings
 
-### Key Documented Features
-- **Interactive package selector**: Full keyboard navigation with arrow keys, space bar selection, and pagination
-- **Version management**: Intelligent version comparison and automatic updates
-- **Nested structure handling**: Recursive processing of DMG-in-DMG and complex installation packages
-- **System compatibility**: Apple Silicon detection and Rosetta installation guidance
-- **Security features**: Sudo permission management, quarantine removal, and path validation
-- **Installation reporting**: Comprehensive result tracking and user-friendly summary display
+### Interactive Package Selector Controls
+- **Arrow keys**: Navigate up/down, left/right for pagination
+- **Space**: Toggle selection
+- **Enter**: Confirm and proceed with installation
+- **Ctrl+A**: Select all packages
+- **Ctrl+N**: Deselect all packages
+- **q / ESC**: Quit without installing
