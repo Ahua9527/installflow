@@ -30,3 +30,8 @@ Frontend/.wrangler
 # Claude
 .claude
 docs/
+.agents/skills/
+design-md/
+node_modules/
+.wrangler/
+skills-lock.json
